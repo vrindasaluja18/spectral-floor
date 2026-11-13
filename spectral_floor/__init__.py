@@ -9,7 +9,7 @@ best any linear predictor can do, so it lower-bounds the error of any world mode
 that observes at rate R/s.
 """
 
-from .psd import welch_psd, debias_welch, ar1_psd, normalise_psd
+from .psd import welch_psd, debias_welch, ar1_psd, normalise_psd, two_sided_psd
 from .floor import (
     szego,
     alias_spectrum,
@@ -24,6 +24,7 @@ __all__ = [
     "debias_welch",
     "ar1_psd",
     "normalise_psd",
+    "two_sided_psd",
     "szego",
     "alias_spectrum",
     "floor_curve",

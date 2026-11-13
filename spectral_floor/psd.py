@@ -96,6 +96,43 @@ def debias_welch(
     return freqs, corrected
 
 
+def two_sided_psd(
+    freqs: np.ndarray,
+    psd: np.ndarray,
+    n_grid: int = 20001,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Expand a one-sided PSD on [0, 0.5] to an even density on [0, 1).
+
+    A real-valued stationary process has an even spectral density, ``S(f) = S(1-f)``.
+    ``welch_psd`` returns the one-sided spectrum on ``[0, 0.5]`` -- all the
+    information, since the upper band is its mirror image -- but the aliasing
+    identity folds the whole ``[0, 1)`` band and therefore needs the full density.
+
+    The obvious shortcut, interpolating the one-sided spectrum onto ``[0, 1)``
+    with ``numpy.interp``, is wrong: ``interp`` clamps every frequency above 0.5
+    to ``S(0.5)``, making the upper band constant. Since the folding step sums the
+    shifted copies of ``S``, that error compounds with stride -- for AR(1) it makes
+    the floor ~46% too low at stride 16. Mirroring is the exact construction.
+
+    Returns ``(u, S)`` on a dense uniform grid over ``[0, 1)``, with ``S``
+    normalised to unit mean.
+    """
+    freqs = np.asarray(freqs, dtype=float).ravel()
+    psd = np.asarray(psd, dtype=float).ravel()
+    if freqs.shape != psd.shape:
+        raise ValueError("freqs and psd must have the same shape")
+    if freqs.size < 2:
+        raise ValueError("need at least two frequency bins")
+    # Reflect the interior bins; keep DC and Nyquist each exactly once. Append the
+    # endpoint at 1.0 (== 0.0 on the circle) so the grid spans all of [0, 1) and
+    # `interp` never clamps -- otherwise the last sliver of the band is flat and the
+    # result is very slightly non-even.
+    f_full = np.concatenate([freqs, 1.0 - freqs[-2:0:-1], [1.0]])
+    S_full = np.concatenate([psd, psd[-2:0:-1], [psd[0]]])
+    u = np.linspace(0.0, 1.0, n_grid)[:-1]
+    return u, normalise_psd(np.interp(u, f_full, S_full))
+
+
 def ar1_psd(a: float, u: np.ndarray | None = None) -> tuple[np.ndarray, np.ndarray]:
     """Analytic AR(1) PSD:  S(u) = 1 / |1 - a e^{-i 2 pi u}|^2.
 

@@ -157,25 +157,58 @@ def test_debias_runs_and_stays_positive():
 # --------------------------------------------------------------------------
 # Estimator bias - a real methodological finding, locked in as a regression test
 # --------------------------------------------------------------------------
-def test_welch_floor_is_biased_at_large_stride():
-    """The floor from a Welch estimate is biased, and the bias grows with stride.
+def test_two_sided_psd_is_even_and_normalised():
+    """The full-band spectrum must be even, S(f) == S(1-f), and unit-mean."""
+    from spectral_floor import two_sided_psd
+    f = np.linspace(0, 0.5, 257)
+    S = 1.0 / (1.0 + (f - 0.1) ** 2)          # arbitrary one-sided shape
+    u, S_full = two_sided_psd(f, S)
+    assert S_full.mean() == pytest.approx(1.0)
+    # evenness on the unit circle: S(u) == S(1-u). The grid is uniform, so the
+    # mirror of index k is index (-k) mod n; compare by direct indexing, not by a
+    # second interpolation (which would add its own error).
+    n = len(u)
+    assert np.allclose(S_full, np.roll(S_full[::-1], 1), rtol=1e-9, atol=1e-12)
 
-    At s=16 the estimate reads ~0.153 against a true 0.275. Use the analytic
-    spectrum when you have one; this pins the size of the effect.
+
+def test_two_sided_psd_rejects_mismatched_shapes():
+    from spectral_floor import two_sided_psd
+    with pytest.raises(ValueError):
+        two_sided_psd(np.linspace(0, 0.5, 10), np.ones(9))
+
+
+def test_clamping_the_one_sided_psd_biases_the_floor_low():
+    """Regression: interpolating a one-sided PSD onto [0, 1) clamps the upper band.
+
+    ``numpy.interp`` saturates above 0.5, so the folding step then sums a wrong
+    upper band and the floor comes out low, increasingly with stride. This test
+    pins the size of the error (it is the bug the experiment runner had) and checks
+    that ``two_sided_psd`` removes it.
     """
-    from experiments.run_floor_experiment import simulate_ar1, ar1_true_spectrum
-
-    x = simulate_ar1(0.99, 400_000, seed=0)
-    _, S_hat = welch_psd(x, nperseg=512)
-    S_hat = normalise_psd(S_hat)
-    grid = np.linspace(0, 0.5, len(S_hat))
-    u = np.linspace(0, 1, 20001)[:-1]
-    S = normalise_psd(np.interp(u, grid, S_hat))
+    from spectral_floor import two_sided_psd
+    from experiments.run_floor_experiment import ar1_true_spectrum
 
     S_true = ar1_true_spectrum(0.99)
-    floor_est = szego(alias_spectrum(S, 16))
-    floor_true = szego(alias_spectrum(S_true, 16))
-    assert floor_est < floor_true - 0.1, "expected a large downward bias at s=16"
+    half = S_true[: len(S_true) // 2 + 1]
+    grid = np.linspace(0, 0.5, len(half))
+    u = np.linspace(0, 1, 20001)[:-1]
+    S_clamped = normalise_psd(np.interp(u, grid, half))
+
+    _, S_mirrored = two_sided_psd(grid, half)
+
+    for s in (4, 16):
+        f_true = szego(alias_spectrum(S_true, s))
+        f_clamp = szego(alias_spectrum(S_clamped, s))
+        f_mirror = szego(alias_spectrum(S_mirrored, s))
+        # clamping biases low, and the bias grows with stride
+        assert f_clamp < f_true - 0.02, f"expected low bias at s={s}"
+        # mirroring is close to the true two-sided spectrum
+        assert f_mirror == pytest.approx(f_true, rel=0.02)
+    # the clamping bias grows sharply with stride: ~0.0002 at s=1, ~0.13 at s=16
+    bias1 = szego(alias_spectrum(S_true, 1)) - szego(alias_spectrum(S_clamped, 1))
+    bias16 = szego(alias_spectrum(S_true, 16)) - szego(alias_spectrum(S_clamped, 16))
+    assert bias1 < 0.005 and bias16 > 0.1
+    assert bias16 > 20 * bias1
 
 
 def test_analytic_floor_binds_on_ar1():
