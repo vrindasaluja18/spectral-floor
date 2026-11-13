@@ -1,0 +1,1131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>The Decoder, Explained — maths first, compute as budget</title>
+<style>
+  :root {
+    --bg: #0b0e14;
+    --panel: #121722;
+    --panel-2: #161d2b;
+    --line: #243044;
+    --ink: #e6edf7;
+    --dim: #93a1b8;
+    --dim-2: #6b7a93;
+    --accent: #6ea8fe;
+    --accent-2: #a78bfa;
+    --good: #34d399;
+    --warn: #fbbf24;
+    --bad: #fb7185;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: var(--sans); line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1040px; margin: 0 auto; padding: 0 20px 96px; }
+
+  header.hero { padding: 64px 0 40px; border-bottom: 1px solid var(--line); }
+  .kicker {
+    font-family: var(--mono); font-size: 12px; letter-spacing: .18em;
+    text-transform: uppercase; color: var(--accent); margin-bottom: 14px;
+  }
+  h1 { font-size: clamp(30px, 5vw, 52px); line-height: 1.08; margin: 0 0 16px; letter-spacing: -.02em; }
+  h1 .thin { color: var(--dim); font-weight: 400; }
+  .lede { font-size: 19px; color: var(--dim); max-width: 74ch; margin: 0; }
+  .lede strong { color: var(--ink); }
+  .byline {
+    margin-top: 22px; font-family: var(--mono); font-size: 12.5px; color: var(--dim-2);
+    display: flex; gap: 18px; flex-wrap: wrap;
+  }
+  .byline a { color: var(--dim-2); text-decoration: none; border-bottom: 1px dotted var(--dim-2); }
+  .byline a:hover { color: var(--accent); border-color: var(--accent); }
+
+  section { padding: 56px 0 8px; border-top: 1px solid var(--line); }
+  section:first-of-type { border-top: none; }
+  .secnum {
+    font-family: var(--mono); font-size: 12px; color: var(--accent-2);
+    letter-spacing: .16em; text-transform: uppercase; margin-bottom: 10px;
+  }
+  h2 { font-size: clamp(22px, 3.2vw, 31px); margin: 0 0 14px; letter-spacing: -.01em; line-height: 1.2; }
+  h3 { font-size: 17px; margin: 30px 0 10px; color: var(--ink); }
+  p { margin: 0 0 14px; max-width: 76ch; }
+  .muted { color: var(--dim); }
+  ul { max-width: 76ch; padding-left: 20px; }
+  li { margin-bottom: 7px; }
+
+  .math {
+    font-family: var(--mono); font-size: 14.5px; line-height: 1.9;
+    background: var(--panel); border: 1px solid var(--line);
+    border-left: 3px solid var(--accent); border-radius: 8px;
+    padding: 16px 18px; margin: 16px 0; overflow-x: auto; white-space: pre;
+    color: #dbe7ff;
+  }
+  .math .c { color: var(--dim-2); }
+  .math .hi { color: var(--warn); }
+  .math .g { color: var(--good); }
+  .math .r { color: var(--bad); }
+  .math b { color: #fff; }
+  code {
+    font-family: var(--mono); font-size: .92em; background: var(--panel-2);
+    padding: 1px 6px; border-radius: 4px; color: #cfe0ff;
+  }
+
+  .card {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 12px; padding: 22px; margin: 20px 0;
+  }
+  .card h3 { margin-top: 0; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 760px) { .grid2 { grid-template-columns: 1fr; } }
+
+  .stage {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 12px; padding: 14px; margin: 18px 0; overflow: hidden;
+  }
+  .stage canvas { display: block; width: 100%; height: auto; border-radius: 8px; background: #080a10; }
+  .caption { font-size: 13px; color: var(--dim-2); margin-top: 10px; font-family: var(--mono); }
+  .controls { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-top: 12px; }
+
+  button, .btn {
+    font-family: var(--mono); font-size: 12.5px; color: var(--ink);
+    background: var(--panel-2); border: 1px solid var(--line);
+    border-radius: 7px; padding: 8px 14px; cursor: pointer; transition: .15s;
+  }
+  button:hover { border-color: var(--accent); color: #fff; }
+  button.on { background: rgba(110,168,254,.14); border-color: var(--accent); color: #fff; }
+  button.play { border-color: var(--accent); color: var(--accent); }
+  button.play:hover { background: rgba(110,168,254,.12); color: #fff; }
+
+  .sliders { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 26px; margin: 6px 0 2px; }
+  @media (max-width: 760px) { .sliders { grid-template-columns: 1fr; } }
+  .sl { display: flex; flex-direction: column; gap: 4px; }
+  .sl label { font-family: var(--mono); font-size: 12px; color: var(--dim); display: flex; justify-content: space-between; gap: 10px; }
+  .sl label b { color: var(--accent); font-weight: 600; }
+  input[type=range] {
+    -webkit-appearance: none; appearance: none; width: 100%; height: 4px;
+    background: var(--line); border-radius: 4px; outline: none;
+  }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none; width: 15px; height: 15px; border-radius: 50%;
+    background: var(--accent); cursor: pointer; border: 2px solid var(--bg);
+  }
+  input[type=range]::-moz-range-thumb {
+    width: 15px; height: 15px; border-radius: 50%; background: var(--accent);
+    cursor: pointer; border: 2px solid var(--bg);
+  }
+
+  .readout { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-top: 18px; }
+  @media (max-width: 760px) { .readout { grid-template-columns: 1fr 1fr; } }
+  .ro {
+    background: var(--panel-2); border: 1px solid var(--line);
+    border-radius: 9px; padding: 12px 14px;
+  }
+  .ro .k { font-family: var(--mono); font-size: 10.5px; letter-spacing: .1em; text-transform: uppercase; color: var(--dim-2); }
+  .ro .v { font-family: var(--mono); font-size: 19px; color: #fff; margin-top: 3px; }
+  .ro .u { font-size: 11px; color: var(--dim-2); font-family: var(--mono); }
+  .bar { height: 6px; background: var(--line); border-radius: 4px; overflow: hidden; margin-top: 9px; }
+  .bar > i { display: block; height: 100%; background: linear-gradient(90deg, var(--good), var(--warn), var(--bad)); transition: width .25s; }
+
+  .verdict { font-family: var(--mono); font-size: 13.5px; padding: 12px 16px; border-radius: 9px; margin-top: 16px; border: 1px solid var(--line); background: var(--panel-2); }
+  .verdict.g { border-color: rgba(52,211,153,.5); color: var(--good); }
+  .verdict.w { border-color: rgba(251,191,36,.5); color: var(--warn); }
+  .verdict.r { border-color: rgba(251,113,133,.5); color: var(--bad); }
+
+  table { border-collapse: collapse; width: 100%; margin: 16px 0; font-size: 14px; }
+  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+  th { font-family: var(--mono); font-size: 11.5px; text-transform: uppercase; letter-spacing: .08em; color: var(--dim-2); font-weight: 500; }
+  td.num { font-family: var(--mono); color: #cfe0ff; }
+  tr.hl td { background: rgba(110,168,254,.07); }
+
+  footer { border-top: 1px solid var(--line); margin-top: 60px; padding-top: 26px; color: var(--dim-2); font-size: 13.5px; }
+  footer a { color: var(--accent); text-decoration: none; }
+  .reveal { opacity: 0; transform: translateY(14px); transition: opacity .6s, transform .6s; }
+  .reveal.in { opacity: 1; transform: none; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <div class="kicker">V-JEPA 2.1 &nbsp;→&nbsp; diffusion decoder &nbsp;→&nbsp; Cosmos latents</div>
+  <h1>What a <span class="thin">decoder</span> actually is<br />— in maths, and what it costs</h1>
+  <p class="lede">
+    An encoder compresses; a <strong>decoder</strong> goes back. The interesting part is never the
+    direction — it's <strong>what information survived the compression</strong>, and how much
+    <strong>compute</strong> you pay to fake what didn't. That's the whole page.
+  </p>
+  <div class="byline">
+    <span>vrinda &nbsp;·&nbsp; salujavrinda018@gmail.com</span>
+    <span>maths first, compute as a budget</span>
+  </div>
+</header>
+
+<section class="reveal">
+  <div class="secnum">00 · the whole idea in one line</div>
+  <h2>Encoder kills information. Decoder can only spend compute trying to get it back.</h2>
+  <p>
+    Everything below is a consequence of two facts: <b>(1)</b> the encoder is a
+    <em>many-to-one</em> map, so information is genuinely destroyed — not hidden; and
+    <b>(2)</b> compute is finite, so you cannot brute-force it back.
+  </p>
+  <div class="math">x  ──<span class="c">E (encoder)</span>──►  z  ──<span class="c">D (decoder)</span>──►  x̂
+
+<span class="c">E is many-to-one:  E(x₁) = E(x₂) = z  even when x₁ ≠ x₂</span>
+<span class="r">⇒ the exact x is NOT recoverable from z. Ever. No model size fixes this.</span>
+<span class="hi">⇒ a decoder is a conditional distribution p(x | z), not a function x = D(z).</span></div>
+  <p class="muted">
+    Hold on to that last line. If you remember one thing from this page: <b>a good decoder is a
+    probability distribution, not a function.</b> That single choice is why the paper you were
+    reading uses a <em>diffusion</em> model.
+  </p>
+</section>
+
+<section class="reveal">
+  <div class="secnum">01 · the pipeline</div>
+  <h2>Two encoders, one decoder, and a rate mismatch</h2>
+  <p>Watch where the rates change. The bottleneck is the 4× compression, and it appears twice.</p>
+
+  <div class="stage">
+    <canvas id="pipe" width="1000" height="330"></canvas>
+    <div class="controls">
+      <button class="play" id="pipePlay">⏸ pause</button>
+      <span class="caption" style="margin:0">frames flow left → right; dot speed = rate</span>
+    </div>
+    <div class="caption" id="pipeCaption">…</div>
+  </div>
+
+  <div class="math">V-JEPA encoder E :  zᵢ = E(x₁₊₄₍ᵢ₋₁₎)        <span class="c">frame skip s = 4</span>
+                     rate = 20 fps / 4 = <b>5 Hz</b>      dim z = d
+
+Cosmos tokenizer C :  cₜ = C(xₜ)                  <span class="c">no skip</span>
+                     rate = <b>20 Hz</b>                 dim c = m
+
+decoder  p_θ :  c₁:ₜ  ~  p_θ( · | z₁:ₜ/₄ )        <span class="hi">5 Hz in → 20 Hz out</span></div>
+</section>
+
+<section class="reveal">
+  <div class="secnum">02 · where the information dies</div>
+  <h2>Frame skip = 4 keeps 1 frame, deletes 3</h2>
+  <p>
+    This is the crux. Below, each block is one RGB frame at 20 fps. The encoder <em>reads</em>
+    only the blue ones. The three grey frames in between are never seen — so their content
+    cannot be in <code>z</code>.
+  </p>
+
+  <div class="stage">
+    <canvas id="skip" width="1000" height="250"></canvas>
+    <div class="controls">
+      <button id="skipToggle">highlight: kept frames</button>
+      <span class="caption" style="margin:0">click to switch between “what E reads” and “what C sees”</span>
+    </div>
+    <div class="caption" id="skipCaption">…</div>
+  </div>
+
+  <div class="math">I( x_{4i+k} ; zᵢ , zᵢ₊₁ ) ≈ 0      for k = 1,2,3      <span class="c">mutual information</span>
+
+<span class="c">zᵢ  = E(x_{4i})       zᵢ₊₁ = E(x_{4i+4})</span>
+<span class="c">the frames x_{4i+1}, x_{4i+2}, x_{4i+3} are in NO z. Their info is gone.</span>
+<span class="r">⇒ asking the decoder to output them is asking it to invent, not to recover.</span></div>
+  <p>
+    In information terms: the encoder's output rate is roughly <code>d · 5</code> units/s, while
+    the Cosmos stream carries <code>m · 20</code>. If <code>m·20 &gt; d·5</code>, the decoder
+    must <b>generate</b> the shortfall. There is no way around it.
+  </p>
+</section>
+
+<section class="reveal">
+  <div class="secnum">03 · why “just use a normal decoder” fails</div>
+  <h2>Least-squares training gives you the average — and the average is blur</h2>
+  <p>
+    Train any deterministic decoder <code>f</code> to minimize squared error. The optimum is the
+    conditional mean, and that mean is the <em>weighted blur</em> of every frame that could
+    plausibly sit between the two you observed.
+  </p>
+  <div class="math"><span class="c">minimize over f :</span>  𝔼 ‖ x − f(z) ‖²
+<span class="c">set derivative to 0 :</span>  f*(z) = 𝔼[ x | z ]      <span class="g">← the conditional mean</span>
+
+<span class="r">= a weighted average of ALL possible in-between frames = a smear.</span>
+<span class="hi">A generative decoder instead SAMPLES  x ~ p(x | z)  → sharp, one plausible world.</span></div>
+
+  <div class="stage">
+    <canvas id="blur" width="1000" height="260"></canvas>
+    <div class="controls">
+      <button id="blurMean">show: deterministic (mean)</button>
+      <button id="blurSample" class="on">show: generative (sample)</button>
+      <span class="caption" style="margin:0">drag to move the true in-between frame</span>
+      <input type="range" id="blurRange" min="0" max="100" value="50" style="max-width:180px" />
+    </div>
+    <div class="caption" id="blurCaption">…</div>
+  </div>
+  <p class="muted">
+    Notice: the generative panel is not “more correct”. It is a <em>sample</em>. It can be wrong in
+    a way the mean never is — but it is never blurry. That trade is the entire value proposition
+    of diffusion, and you pay for it in step count.
+  </p>
+</section>
+
+<section class="reveal">
+  <div class="secnum">04 · the diffusion decoder, mathematically</div>
+  <h2>Learn to undo noise, conditioned on the features</h2>
+  <p>Forward process: destroy <code>x⁰</code> with Gaussian noise. No learning here — pure arithmetic.</p>
+  <div class="math"><span class="c">forward (fixed):</span>
+x^τ = √ᾱ_τ · x⁰ + √(1 − ᾱ_τ) · ε ,     ε ~ N(0, I) ,   τ = 0…N
+
+<span class="c">reverse (learned): network ε_θ conditioned on z</span>
+<span class="hi">L(θ) = 𝔼 ‖ ε − ε_θ( √ᾱ_τ x⁰ + √(1−ᾱ_τ) ε , τ , z ) ‖²</span>
+        <span class="c">          └─ noisy input ─┘  └τ┘  └conditioning┘</span></div>
+  <p>
+    “<b>Spatially conditioned</b>” means <code>z</code> is injected patch-aligned: each output
+    patch looks only at the feature at the same grid cell, so conditioning is a <em>local</em>
+    function of space, not one global vector. That's what makes the imagined motion consistent
+    across the frame instead of hallucinated independently per pixel.
+  </p>
+
+  <div class="stage">
+    <canvas id="denoise" width="1000" height="300"></canvas>
+    <div class="controls">
+      <button class="play" id="denoisePlay">⏸ pause</button>
+      <input type="range" id="denoiseRange" min="0" max="100" value="0" style="max-width:320px" />
+      <span class="caption" style="margin:0" id="denoiseTau">τ = N (pure noise)</span>
+    </div>
+    <div class="caption">each of the N steps is one full network forward pass → that's the compute bill.</div>
+  </div>
+</section>
+
+<section class="reveal">
+  <div class="secnum">05 · compute as a budget — drag these</div>
+  <h2>The decoder is ~10⁸× more expensive per step than a linear readout</h2>
+  <p>
+    This is the part that matters for your thesis. A transformer forward pass costs about
+    <code>2·P·n</code> FLOPs (<code>P</code> params, <code>n</code> tokens). Diffusion needs
+    <code>N</code> of them per output step, and you need 5 output steps per second of 20 fps video.
+  </p>
+
+  <div class="card">
+    <div class="sliders">
+      <div class="sl">
+        <label>P — decoder params <b id="pVal">3.16e8</b></label>
+        <input type="range" id="pRange" min="6" max="10" step="0.1" value="8.5" />
+      </div>
+      <div class="sl">
+        <label>n — tokens per call <b id="nVal">1000</b></label>
+        <input type="range" id="nRange" min="1" max="6" step="0.1" value="3" />
+      </div>
+      <div class="sl">
+        <label>N — denoising steps <b id="NVal">100</b></label>
+        <input type="range" id="NRange" min="1" max="4" step="0.1" value="2" />
+      </div>
+      <div class="sl">
+        <label>d — reservoir state dim <b id="dVal">1000</b></label>
+        <input type="range" id="dRange" min="1" max="6" step="0.1" value="3" />
+      </div>
+    </div>
+
+    <div class="readout">
+      <div class="ro"><div class="k">decoder FLOPs / s of video</div><div class="v" id="roDec">—</div><div class="u">10·P·n·N</div></div>
+      <div class="ro"><div class="k">linear readout FLOPs</div><div class="v" id="roLin">—</div><div class="u">2·d²  per step</div></div>
+      <div class="ro"><div class="k">ratio decoder / readout</div><div class="v" id="roRatio">—</div><div class="u">× more expensive</div></div>
+      <div class="ro"><div class="k">GPU-seconds / s of video</div><div class="v" id="roGpu">—</div><div class="u">@ 5e14 FLOP/s dense</div></div>
+    </div>
+    <div class="bar"><i id="roBar" style="width:0%"></i></div>
+
+    <div class="readout" style="grid-template-columns:repeat(2,1fr)">
+      <div class="ro"><div class="k">decoder weight bytes (fp16)</div><div class="v" id="roBytes">—</div><div class="u">2·P bytes</div></div>
+      <div class="ro"><div class="k">readout weight bytes (fp16)</div><div class="v" id="roBytesLin">—</div><div class="u">2·d² bytes</div></div>
+    </div>
+
+    <div class="verdict" id="verdict">—</div>
+  </div>
+
+  <h3>Where the cost actually lives</h3>
+  <ul>
+    <li><b>N multiplies everything.</b> Halving steps halves FLOPs <em>and</em> latency. This is why
+      distillation / few-step samplers are a whole research field.</li>
+    <li><b>Latency is sequential.</b> The N steps cannot be parallelised across time, so
+      wall-clock scales with N. FLOPs you can buy with GPUs; latency you cannot.</li>
+    <li><b>Memory</b> is <code>O(P)</code> weights + per-step activations, versus
+      <code>O(d²)</code> for a linear readout. For d = 10³ that's ~2 MB versus gigabytes.</li>
+  </ul>
+
+  <div class="math"><span class="c">one decoder call:</span>        FLOPs ≈ 2 · P · n · N
+<span class="c">one second of 20 fps video:</span> FLOPs ≈ 5 · 2 · P · n · N = <b>10 P n N</b>
+<span class="c">linear readout, one step:</span>  FLOPs = 2 d²
+<span class="g">ratio ≈ (10 P n N) / (2 d²)</span>   <span class="c">→ drag the sliders and read it off</span></div>
+</section>
+
+<section class="reveal">
+  <div class="secnum">06 · the trap</div>
+  <h2>A pretty decoded video is not evidence of a good world model</h2>
+  <div class="math"><span class="g">world model predicts:</span>   p̂( z_{t+1} | z_t )        <span class="c">lives in feature space</span>
+<span class="hi">decoder samples:</span>         p̂_θ( x | z )              <span class="c">lives in pixel/latent space</span>
+
+<span class="r">"the video looks great" measures the SECOND thing, not the first.</span>
+<span class="c">The invented in-between frames come from the decoder's prior, not the world model.</span></div>
+  <p>
+    To separate them you must either decode the <em>ground-truth</em> features too and compare
+    frame-by-frame, or evaluate in <code>z</code>-space where the world model actually lives.
+    Otherwise you are crediting the world model for motion the decoder made up.
+  </p>
+  <div class="grid2">
+    <div class="card">
+      <h3 style="color:var(--good)">What you can claim</h3>
+      <ul style="margin:0">
+        <li>features are decodable at all → they carry visual structure</li>
+        <li>decoded futures are consistent with actions</li>
+        <li>qualitative sanity, nothing more</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3 style="color:var(--bad)">What you cannot claim</h3>
+      <ul style="margin:0">
+        <li>that predicted motion is accurate</li>
+        <li>that in-between frames are correct</li>
+        <li>any quantitative world-model score</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section class="reveal">
+  <div class="secnum">07 · your world</div>
+  <h2>This is your thesis, one level up: a readout is a decoder</h2>
+  <p>Map it across. The structure is identical; only the vocabulary changes.</p>
+  <table>
+    <thead><tr><th>V-JEPA pipeline</th><th>Your ESN / reservoir</th><th>Role</th></tr></thead>
+    <tbody>
+      <tr class="hl"><td>feature <code>z</code></td><td>reservoir state <code>r</code></td><td>compressed memory — the bottleneck</td></tr>
+      <tr><td>V-JEPA encoder E</td><td>reservoir dynamics W, W_in</td><td>many-to-one compression (info dies here)</td></tr>
+      <tr><td>decoder p(x|z)</td><td>linear readout W_out</td><td>map back to observable space</td></tr>
+      <tr><td>frame skip s=4</td><td>fading memory / spectral radius ρ</td><td>how much past survives</td></tr>
+      <tr><td>conditional mean = blur</td><td>MSE readout = smooth average</td><td>same failure mode, same reason</td></tr>
+      <tr><td>diffusion, cost 10PnN</td><td>generative readout, same ~10⁸× cost</td><td>you buy sharpness with FLOPs</td></tr>
+    </tbody>
+  </table>
+
+  <div class="math"><span class="c">the shared law, stated once:</span>
+<span class="hi">a readout cannot emit bits that the state does not contain.</span>
+<span class="c">deterministic readout → pays in blur.</span>
+<span class="g">generative readout    → pays in compute.</span>
+<span class="c">"the maths is cheap; memory is precious" — this page is a case study of it.</span></div>
+</section>
+
+<section class="reveal">
+  <div class="secnum">08 · signals — the right frame for the video phase</div>
+  <h2>20 fps → 5 Hz is <em>decimation by 4</em>. The decoder is bandwidth extension.</h2>
+  <p>
+    This is the answer to “can we apply signals here?”. Yes — and it makes the whole thing precise.
+    Decimation destroys information in a way that is <em>provable</em>: frequencies above the new
+    Nyquist fold back (alias), and the fold is many-to-one.
+  </p>
+
+  <div class="stage">
+    <canvas id="alias" width="1000" height="300"></canvas>
+    <div class="controls">
+      <span class="caption" style="margin:0">drag the true frequency — watch it alias</span>
+      <input type="range" id="aliasRange" min="0" max="100" value="35" style="max-width:260px" />
+      <span class="caption" style="margin:0" id="aliasInfo">…</span>
+    </div>
+    <div class="caption">a tone at 4 Hz, decimated from 20 fps by 4, reappears at 1 Hz. The decoder cannot invert this — it must choose a pre-image.</div>
+  </div>
+
+  <div class="math"><span class="c">decimation by s:</span>   y[m] = x[m·s]        <span class="c">many-to-one ⇒ not invertible</span>
+
+<span class="c">new sample rate:</span>     R/s = 20/4 = 5 Hz   ⇒  <span class="hi">new Nyquist = 2.5 Hz</span>
+<span class="c">any tone in (2.5, 10] Hz folds:</span>
+<span class="r">f_alias = | f − round( f / (R/s) ) · (R/s) |</span>
+<span class="c">f = 4 Hz  →  |4 − 5| = 1 Hz          (verified numerically)</span></div>
+
+  <div class="grid2">
+    <div class="card">
+      <h3>Classical interpolation (sinc / Wiener)</h3>
+      <ul style="margin:0">
+        <li>optimal for <em>band-limited</em> signals</li>
+        <li>MMSE ⇒ returns <code>E[x | z]</code></li>
+        <li>MMSE-optimal <b>must</b> be the smooth average</li>
+        <li>video is not band-limited → blur</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>Diffusion decoder</h3>
+      <ul style="margin:0">
+        <li>models <code>p(x_missing | x_kept)</code></li>
+        <li>samples the folded band from a prior</li>
+        <li>sharp, but not MSE-optimal</li>
+        <li>cost: <code>N</code> sequential passes</li>
+      </ul>
+    </div>
+  </div>
+
+  <p class="muted">
+    Where DSP <em>does</em> pay off is the solver: predictor-corrector, Heun, and multistep samplers
+    are classical numerical integration applied to a learned score. Verified: first-order Euler on a
+    nonlinear score has error halving as <code>N</code> doubles — exactly <code>O(1/N)</code>.
+  </p>
+</section>
+
+<section class="reveal">
+  <div class="secnum">09 · the maths, as functions</div>
+  <h2>Score, Tweedie, and the sampler — written out</h2>
+
+  <div class="math"><span class="c">forward SDE (data → noise):</span>
+dx = f(x,t) dt + g(t) dw
+
+<span class="c">reverse SDE (noise → data) — the only learned object is the SCORE:</span>
+dx = [ f(x,t) − g(t)² ∇ₓ log p_t(x) ] dt + g(t) dw̄
+
+<span class="c">probability-flow ODE (deterministic, SAME marginals):</span>
+<span class="hi">dx = [ f(x,t) − ½ g(t)² ∇ₓ log p_t(x) ] dt</span>
+
+<span class="c">Tweedie — the score IS a denoiser:</span>
+<span class="g">E[x₀ | x_t] = ( x_t + σ_t² ∇ log p_t(x_t) ) / α_t</span>
+<span class="c">⇒ learning the score ⇔ learning ε_θ.  Verified vs exact GMM posteriors, err < 1e-8.</span>
+
+<span class="c">denoising score matching loss:</span>
+L(θ) = E_{x,ε,σ} ‖ ε − ε_θ(α_t x + σ_t ε, σ_t, z) ‖²
+
+<span class="c">classifier-free guidance (z = your V-JEPA features):</span>
+<span class="hi">ε̃ = ε_θ(x,t,∅) + w · ( ε_θ(x,t,z) − ε_θ(x,t,∅) )</span></div>
+
+  <p>
+    Read the guidance line carefully. <code>w</code> is the knob that trades “faithful to the
+    features” against “plausible motion” — which is exactly the trap in §06. Turn <code>w</code> up
+    and the decoder invents confidently; the video looks better and measures the world model worse.
+  </p>
+
+  <h3>Noise schedules (the actual functions)</h3>
+  <div class="math"><span class="c">VP / DDPM linear:</span>
+β(t) = β_min + t(β_max − β_min),     ᾱ_t = exp( −∫₀ᵗ β(u) du )
+
+<span class="c">cosine (Nichol &amp; Dhariwal 2021):</span>
+ᾱ_t = cos²( (t/T + s)/(1+s) · π/2 ) / cos²( s/(1+s) · π/2 ),   s = 0.008
+
+<span class="c">verified at T=1000:  linear ᾱ₉₉₉ = 4.0e-05   cosine ᾱ₉₉₉ = 3.8e-33</span>
+<span class="c">SNR at t=500:       linear = 0.084          cosine = 0.976</span></div>
+</section>
+
+<section class="reveal">
+  <div class="secnum">10 · papers to read, in order</div>
+  <h2>Each one only needs the previous ones</h2>
+  <p>★ = start here. Full annotations in <code>docs/diffusion-maths-and-signals.md</code>.</p>
+
+  <table>
+    <thead><tr><th>#</th><th>Paper</th><th>Why it matters</th></tr></thead>
+    <tbody>
+      <tr class="hl"><td class="num">1</td><td><b>★ DDPM</b> — Ho et al. 2020<br /><code>arXiv:2006.11239</code></td><td>the origin; §2–3 gives the <code>‖ε−ε_θ‖²</code> loss</td></tr>
+      <tr class="hl"><td class="num">2</td><td><b>★ Score-based SDE</b> — Song et al. 2021<br /><code>arXiv:2011.13456</code></td><td>unifies everything; PF-ODE, predictor-corrector</td></tr>
+      <tr class="hl"><td class="num">3</td><td><b>★ Random Walks with Tweedie</b> — Park &amp; McCann 2024<br /><code>arXiv:2411.18702</code></td><td><b>written for the signal-processing community</b>; shortest DSP→diffusion path</td></tr>
+      <tr><td class="num">4</td><td>EDM — Karras et al. 2022<br /><code>arXiv:2206.00364</code></td><td>design space, preconditioning, Heun solver</td></tr>
+      <tr><td class="num">5</td><td>Latent Diffusion — Rombach et al. 2021<br /><code>arXiv:2112.10752</code></td><td>diffuse in latent space — what Cosmos does</td></tr>
+      <tr><td class="num">6</td><td>Improved DDPM — Nichol &amp; Dhariwal 2021<br /><code>arXiv:2102.09672</code></td><td>the cosine schedule</td></tr>
+      <tr><td class="num">7</td><td>Consistency Models — Song et al. 2023<br /><code>arXiv:2303.01469</code></td><td>1-step generation; the answer to “N is the budget”</td></tr>
+      <tr><td class="num">8</td><td>DPM-Solver — Lu et al. 2022<br /><code>arXiv:2206.00927</code></td><td>exponential-integrator multistep samplers</td></tr>
+      <tr><td class="num">9</td><td>Flow Matching — Lipman et al. 2022<br /><code>arXiv:2210.02747</code></td><td>straight paths → fewer steps; what video models use now</td></tr>
+      <tr><td class="num">10</td><td>Video Diffusion Models — Ho et al. 2022<br /><code>arXiv:2204.03458</code></td><td>the first video DDPM</td></tr>
+      <tr class="hl"><td class="num">11</td><td><b>★ AceVFI survey</b> — Kye et al. 2025<br /><code>arXiv:2506.01061</code></td><td>250+ frame-interpolation papers — <em>this is the “3 missing frames” problem</em></td></tr>
+      <tr><td class="num">12</td><td>Brownian Bridge Interp. — Lyu et al. 2024<br /><code>arXiv:2405.05953</code></td><td>diffusion with <em>both</em> endpoints fixed to observed frames</td></tr>
+      <tr><td class="num">13</td><td>HF <code>diffusers</code> — library<br /><code>huggingface.co/docs/diffusers</code></td><td>read <code>schedulers/</code> <em>after</em> #4</td></tr>
+    </tbody>
+  </table>
+
+  <div class="math"><span class="c">the signal-processing proof of your thesis:</span>
+<span class="hi">decimation is many-to-one ⇒ aliasing ⇒ the lost band is unrecoverable by any linear filter.</span>
+<span class="c">A linear (MMSE) readout returns the conditional mean = the low-passed blur.</span>
+<span class="g">A generative readout samples the folded band from a learned prior — and pays N passes.</span>
+<span class="c">Same statement for Takens: wrong sampling rate ⇒ aliasing ⇒ no readout fixes it.</span></div>
+</section>
+
+<footer>
+  <p style="max-width:76ch">
+    Built as a visual explainer for the V-JEPA 2.1 → diffusion-decoder → Cosmos-tokenizer pipeline,
+    framed maths-first with compute as a finite budget. Numbers here are order-of-magnitude
+    estimates with their assumptions stated — treat them as a budget, not a benchmark.
+  </p>
+  <p>
+    vrinda · <a href="mailto:salujavrinda018@gmail.com">salujavrinda018@gmail.com</a> ·
+    <a href="https://github.com/vrindasaluja18">github.com/vrindasaluja18</a>
+  </p>
+</footer>
+</div>
+
+<script>
+const TAU = Math.PI * 2;
+const lerp = (a, b, t) => a + (b - a) * t;
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+const C = {
+  ink:'#e6edf7', dim:'#93a1b8', dim2:'#6b7a93', line:'#243044',
+  accent:'#6ea8fe', accent2:'#a78bfa', good:'#34d399', warn:'#fbbf24', bad:'#fb7185'
+};
+function setupCanvas(cv){
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  const w = +cv.dataset.w || cv.width;
+  const h = +cv.dataset.h || cv.height;
+  if (cv.dataset.dpr !== String(dpr)) {
+    cv.dataset.w = w; cv.dataset.h = h;
+    cv.width = w * dpr; cv.height = h * dpr;
+    cv.dataset.dpr = String(dpr);
+    const ctx = cv.getContext('2d');
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  return { ctx: cv.getContext('2d'), w, h };
+}
+function roundRect(ctx, x, y, w, h, r){
+  r = Math.min(r, Math.abs(w)/2, Math.abs(h)/2);
+  ctx.beginPath();
+  ctx.moveTo(x+r, y);
+  ctx.arcTo(x+w, y, x+w, y+h, r);
+  ctx.arcTo(x+w, y+h, x, y+h, r);
+  ctx.arcTo(x, y+h, x, y, r);
+  ctx.arcTo(x, y, x+w, y, r);
+  ctx.closePath();
+}
+function arrow(ctx, x1, y1, x2, y2, col){
+  ctx.strokeStyle = col; ctx.fillStyle = col; ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke();
+  const a = Math.atan2(y2-y1, x2-x1), s = 7;
+  ctx.beginPath();
+  ctx.moveTo(x2,y2);
+  ctx.lineTo(x2 - s*Math.cos(a-.4), y2 - s*Math.sin(a-.4));
+  ctx.lineTo(x2 - s*Math.cos(a+.4), y2 - s*Math.sin(a+.4));
+  ctx.closePath(); ctx.fill();
+}
+function rand2(i, j){ return ((Math.sin(i*127.1 + j*311.7) * 43758.5453) % 1 + 1) % 1; }
+
+/* ---------- 01 pipeline ---------- */
+(function(){
+  const cv = document.getElementById('pipe');
+  const caption = document.getElementById('pipeCaption');
+  let running = true, last = performance.now(), t = 0;
+  const caps = [
+    'RGB frames at 20 fps — the raw signal.',
+    'V-JEPA encoder E reads 1 frame in 4 → features z at 5 Hz. Information dies here.',
+    'Cosmos tokenizer C reads every frame → latents c at 20 Hz (full information).',
+    'The decoder is conditioned on z (5 Hz) but must output c (20 Hz): it invents the 3 missing frames.'
+  ];
+  function draw(now){
+    const { ctx, w, h } = setupCanvas(cv);
+    const dt = Math.min(0.05, (now - last)/1000); last = now;
+    if (running) t += dt;
+    ctx.clearRect(0,0,w,h);
+
+    const rowY = [70, 160, 250], boxH = 34;
+
+    ctx.font = '11px ui-monospace, monospace';
+    ctx.fillStyle = C.dim2;
+    ctx.fillText('RGB  x_t          20 fps', 14, 40);
+    for (let i = 0; i < 20; i++){
+      const x = 210 + i * 39;
+      const isKey = i % 4 === 0;
+      const pulse = 0.5 + 0.5 * Math.sin(t*2 + i*0.5);
+      ctx.fillStyle = isKey ? `rgba(110,168,254,${0.28 + 0.5*pulse})` : 'rgba(147,161,184,0.16)';
+      ctx.strokeStyle = isKey ? C.accent : 'rgba(147,161,184,0.35)';
+      ctx.lineWidth = 1;
+      roundRect(ctx, x, rowY[0]-boxH/2, 30, boxH, 5); ctx.fill(); ctx.stroke();
+      if (isKey){ ctx.fillStyle = 'rgba(110,168,254,0.55)'; ctx.fillRect(x+4, rowY[0]-boxH/2+5, 22, 24); }
+    }
+
+    ctx.fillStyle = C.dim2; ctx.font = '11px ui-monospace, monospace';
+    ctx.fillText('V-JEPA  z_i      5 Hz', 14, 132);
+    for (let i = 0; i < 5; i++){
+      const x = 210 + (i*4)*39 + 15;
+      const glow = 0.5 + 0.5 * Math.sin(t*2 - i*0.7);
+      ctx.fillStyle = `rgba(167,139,250,${0.25 + 0.55*glow})`;
+      ctx.strokeStyle = C.accent2; ctx.lineWidth = 1.4;
+      roundRect(ctx, x-19, rowY[1]-boxH/2, 38, boxH, 8); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = C.ink; ctx.font = '11px ui-monospace, monospace';
+      ctx.textAlign = 'center'; ctx.fillText('z'+(i+1), x, rowY[1]+4); ctx.textAlign = 'left';
+    }
+
+    ctx.fillStyle = C.dim2; ctx.font = '11px ui-monospace, monospace';
+    ctx.fillText('Cosmos  c_t      20 Hz', 14, 222);
+    for (let i = 0; i < 20; i++){
+      const x = 210 + i * 39;
+      const known = i % 4 === 0;
+      const ph = 0.5 + 0.5 * Math.sin(t*1.6 + i*0.6);
+      ctx.fillStyle = known ? `rgba(52,211,153,${0.2+0.5*ph})` : `rgba(251,191,36,${0.12+0.45*ph})`;
+      ctx.strokeStyle = known ? C.good : C.warn; ctx.lineWidth = 1;
+      roundRect(ctx, x, rowY[2]-boxH/2, 30, boxH, 5); ctx.fill(); ctx.stroke();
+      if (!known){
+        ctx.fillStyle = 'rgba(251,191,36,0.9)';
+        ctx.font = '12px ui-monospace, monospace'; ctx.textAlign = 'center';
+        ctx.fillText('?', x+15, rowY[2]+4); ctx.textAlign = 'left';
+      }
+    }
+
+    arrow(ctx, 160, rowY[0], 160, rowY[1], 'rgba(167,139,250,0.65)');
+    ctx.save(); ctx.translate(128, (rowY[0]+rowY[1])/2); ctx.rotate(-Math.PI/2);
+    ctx.fillStyle = C.accent2; ctx.font = '10.5px ui-monospace, monospace'; ctx.textAlign = 'center';
+    ctx.fillText('E  (skip 4)', 0, 0); ctx.restore();
+
+    arrow(ctx, 160, rowY[0]+22, 160, rowY[2], 'rgba(52,211,153,0.65)');
+    ctx.save(); ctx.translate(128, (rowY[0]+rowY[2])/2 + 12); ctx.rotate(-Math.PI/2);
+    ctx.fillStyle = C.good; ctx.font = '10.5px ui-monospace, monospace'; ctx.textAlign = 'center';
+    ctx.fillText('C  (no skip)', 0, 0); ctx.restore();
+
+    arrow(ctx, 860, rowY[1], 860, rowY[2], 'rgba(251,191,36,0.75)');
+    ctx.fillStyle = C.warn; ctx.font = '10.5px ui-monospace, monospace';
+    ctx.fillText('decoder p_θ', 872, (rowY[1]+rowY[2])/2);
+    ctx.fillText('must invent ?', 872, (rowY[1]+rowY[2])/2 + 15);
+
+    for (let k = 0; k < 24; k++){
+      const p = ((t*0.55 + k/24) % 1);
+      const x = 200 + p * 800;
+      const col = (Math.round(p*20) % 4 === 0) ? C.good : C.warn;
+      ctx.fillStyle = col; ctx.globalAlpha = 0.75;
+      ctx.beginPath(); ctx.arc(x, 300, 2.6, 0, TAU); ctx.fill(); ctx.globalAlpha = 1;
+    }
+    ctx.fillStyle = C.dim2; ctx.font = '10.5px ui-monospace, monospace';
+    ctx.fillText('information flow →', 720, 318);
+
+    caption.textContent = caps[Math.floor(t / 4) % caps.length];
+    requestAnimationFrame(draw);
+  }
+  requestAnimationFrame(draw);
+  document.getElementById('pipePlay').addEventListener('click', e => {
+    running = !running;
+    e.target.textContent = running ? '⏸ pause' : '▶ play';
+  });
+})();
+
+/* ---------- 02 frame skip ---------- */
+(function(){
+  const cv = document.getElementById('skip');
+  const caption = document.getElementById('skipCaption');
+  let mode = 0, last = performance.now(), t = 0;
+
+  function draw(now){
+    const { ctx, w, h } = setupCanvas(cv);
+    const dt = Math.min(0.05, (now - last)/1000); last = now; t += dt;
+    ctx.clearRect(0,0,w,h);
+
+    const n = 16, bw = 52, gap = 8;
+    const totalW = n*bw + (n-1)*gap;
+    const x0 = (w - totalW)/2;
+    const y = 70, bh = 110;
+
+    for (let i = 0; i < n; i++){
+      const x = x0 + i*(bw+gap);
+      const isKey = i % 4 === 0;
+      const shown = mode === 0 ? isKey : true;
+      const ph = 0.5 + 0.5*Math.sin(t*2.2 - i*0.5);
+
+      ctx.save();
+      roundRect(ctx, x, y, bw, bh, 7); ctx.clip();
+      if (shown){
+        const g = ctx.createLinearGradient(x, y, x+bw, y+bh);
+        g.addColorStop(0, `hsla(${200 + (i%4)*30}, 55%, ${isKey?42:26}%, 0.85)`);
+        g.addColorStop(1, `hsla(${270 + (i%4)*20}, 45%, ${isKey?30:18}%, 0.85)`);
+        ctx.fillStyle = g; ctx.fillRect(x, y, bw, bh);
+        const bx = x + bw*(0.3 + 0.4*Math.sin(t*0.9 + i*0.7));
+        const by = y + bh*(0.35 + 0.3*Math.cos(t*0.7 + i*0.5));
+        ctx.fillStyle = `rgba(255,255,255,${0.10 + 0.12*ph})`;
+        ctx.beginPath(); ctx.arc(bx, by, 12, 0, TAU); ctx.fill();
+      } else {
+        ctx.fillStyle = 'rgba(120,132,152,0.07)'; ctx.fillRect(x, y, bw, bh);
+      }
+      ctx.restore();
+
+      ctx.lineWidth = isKey ? 2 : 1.2;
+      ctx.strokeStyle = shown ? (isKey ? C.accent : 'rgba(147,161,184,0.5)') : 'rgba(107,122,147,0.28)';
+      roundRect(ctx, x, y, bw, bh, 7); ctx.stroke();
+
+      ctx.font = '10px ui-monospace, monospace'; ctx.textAlign = 'center';
+      ctx.fillStyle = shown ? C.dim : 'rgba(107,122,147,0.5)';
+      ctx.fillText('t='+(i+1), x+bw/2, y+bh+18);
+      if (!shown){
+        ctx.fillStyle = 'rgba(251,113,133,0.85)'; ctx.font = '14px ui-monospace, monospace';
+        ctx.fillText('✕', x+bw/2, y+bh/2+5);
+      }
+      ctx.textAlign = 'left';
+    }
+
+    const gx0 = x0, gx1 = x0 + 4*bw + 3*gap;
+    ctx.strokeStyle = mode===0 ? C.accent : C.good;
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.moveTo(gx0, 40); ctx.lineTo(gx1, 40);
+    ctx.moveTo(gx0, 40); ctx.lineTo(gx0, 50);
+    ctx.moveTo(gx1, 40); ctx.lineTo(gx1, 50);
+    ctx.stroke();
+    ctx.fillStyle = mode===0 ? C.accent : C.good;
+    ctx.font = '11.5px ui-monospace, monospace';
+    ctx.fillText(mode===0 ? 'one z covers these 4 frames' : 'Cosmos keeps all 4', gx0 + 4, 30);
+
+    ctx.fillStyle = C.dim2; ctx.font = '11.5px ui-monospace, monospace';
+    ctx.fillText(mode===0
+      ? 'V-JEPA encoder reads 1 in 4 → z carries only the blue frames'
+      : 'Cosmos tokenizer reads every frame → c carries everything',
+      14, 218);
+
+    caption.textContent = mode===0
+      ? '3 of every 4 frames never reach the encoder. Their content is unrecoverable — only inventable.'
+      : 'Cosmos has all 20 fps. The decoder must match this from 5 Hz features.';
+    requestAnimationFrame(draw);
+  }
+  requestAnimationFrame(draw);
+  document.getElementById('skipToggle').addEventListener('click', e => {
+    mode = 1 - mode;
+    e.target.textContent = mode===0 ? 'highlight: kept frames' : 'highlight: all frames (Cosmos)';
+    e.target.classList.toggle('on', mode===1);
+  });
+})();
+
+/* ---------- 03 mean vs sample ---------- */
+(function(){
+  const cv = document.getElementById('blur');
+  const range = document.getElementById('blurRange');
+  let generative = true, last = performance.now(), t = 0;
+
+  function drawFrame(ctx, x, y, w, h, label, col, side){
+    ctx.save();
+    roundRect(ctx, x, y, w, h, 8); ctx.clip();
+    const g = ctx.createLinearGradient(x, y, x+w, y+h);
+    g.addColorStop(0, `hsla(${side? 265:210}, 55%, 34%, 0.95)`);
+    g.addColorStop(1, `hsla(${side? 300:200}, 45%, 24%, 0.95)`);
+    ctx.fillStyle = g; ctx.fillRect(x, y, w, h);
+    const bx = x + w*(side ? 0.78 : 0.22), by = y + h*0.5;
+    const rg = ctx.createRadialGradient(bx, by, 2, bx, by, 30);
+    rg.addColorStop(0, 'rgba(255,255,255,0.92)'); rg.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = rg; ctx.beginPath(); ctx.arc(bx, by, 30, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(bx, by, 13, 0, TAU); ctx.fill();
+    ctx.restore();
+    ctx.strokeStyle = col; ctx.lineWidth = 1.6;
+    roundRect(ctx, x, y, w, h, 8); ctx.stroke();
+    ctx.fillStyle = col; ctx.font = '11.5px ui-monospace, monospace';
+    ctx.fillText(label, x, y-10);
+  }
+
+  function draw(now){
+    const { ctx, w, h } = setupCanvas(cv);
+    const dt = Math.min(0.05, (now - last)/1000); last = now; t += dt;
+    ctx.clearRect(0,0,w,h);
+
+    const v = range.value / 100;
+    const pw = 290, ph = 150, y = 58;
+    const xA = 30, xB = w - 30 - pw;
+
+    drawFrame(ctx, xA, y, pw, ph, 'observed  x_a', C.accent, 0);
+    drawFrame(ctx, xB, y, pw, ph, 'observed  x_b', C.accent, 1);
+
+    const mw = 230;
+    const mx = (xA + pw + xB)/2 - mw/2;
+    ctx.font = '11.5px ui-monospace, monospace';
+    ctx.fillStyle = C.warn;
+    ctx.fillText('hidden  x_{a+k}', mx, y - 10);
+
+    ctx.save();
+    roundRect(ctx, mx, y, mw, ph, 8); ctx.clip();
+    if (generative){
+      const jitter = 0.5 + 0.5*Math.sin(t*1.7);
+      const pos = clamp(v + (jitter-0.5)*0.18, 0, 1);
+      const g = ctx.createLinearGradient(mx, y, mx+mw, y+ph);
+      g.addColorStop(0, `hsla(${lerp(210,265,pos)}, 55%, 34%, 0.95)`);
+      g.addColorStop(1, `hsla(${lerp(200,300,pos)}, 45%, 24%, 0.95)`);
+      ctx.fillStyle = g; ctx.fillRect(mx, y, mw, ph);
+      const bx = mx + mw*(0.22 + 0.56*pos), by = y + ph*(0.5 + 0.08*Math.sin(t*1.3));
+      const rg = ctx.createRadialGradient(bx, by, 2, bx, by, 30);
+      rg.addColorStop(0, 'rgba(255,255,255,0.92)'); rg.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.fillStyle = rg; ctx.beginPath(); ctx.arc(bx, by, 30, 0, TAU); ctx.fill();
+      ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(bx, by, 13, 0, TAU); ctx.fill();
+      ctx.restore();
+      ctx.strokeStyle = C.good; ctx.lineWidth = 2;
+    } else {
+      ctx.fillStyle = '#0a0d14'; ctx.fillRect(mx, y, mw, ph);
+      let bx = mx + mw*0.22;
+      let rg = ctx.createRadialGradient(bx, y+ph*0.5, 2, bx, y+ph*0.5, 36);
+      rg.addColorStop(0, 'rgba(255,255,255,0.40)'); rg.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.fillStyle = rg; ctx.beginPath(); ctx.arc(bx, y+ph*0.5, 36, 0, TAU); ctx.fill();
+      bx = mx + mw*0.78;
+      rg = ctx.createRadialGradient(bx, y+ph*0.5, 2, bx, y+ph*0.5, 36);
+      rg.addColorStop(0, 'rgba(255,255,255,0.40)'); rg.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.fillStyle = rg; ctx.beginPath(); ctx.arc(bx, y+ph*0.5, 36, 0, TAU); ctx.fill();
+      ctx.restore();
+      ctx.strokeStyle = C.bad; ctx.lineWidth = 2;
+    }
+    roundRect(ctx, mx, y, mw, ph, 8); ctx.stroke();
+
+    const truthX = lerp(xA+pw, xB, v);
+    ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+    ctx.setLineDash([4,5]); ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(truthX, y-16); ctx.lineTo(truthX, y+ph+16); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = C.dim2; ctx.font = '10.5px ui-monospace, monospace';
+    ctx.fillText('truth', truthX-14, y+ph+30);
+
+    ctx.font = '11.5px ui-monospace, monospace';
+    if (generative){
+      ctx.fillStyle = C.good;
+      ctx.fillText('sample x ~ p(x|z)  →  SHARP, one plausible world', 30, h-14);
+      ctx.fillStyle = C.dim2;
+      ctx.fillText('cost: N network passes', 660, h-14);
+    } else {
+      ctx.fillStyle = C.bad;
+      ctx.fillText('mean  E[x|z]  →  BLUR, average of all possibilities', 30, h-14);
+      ctx.fillStyle = C.dim2;
+      ctx.fillText('cost: 1 pass', 660, h-14);
+    }
+    requestAnimationFrame(draw);
+  }
+  requestAnimationFrame(draw);
+  document.getElementById('blurMean').addEventListener('click', e => {
+    generative = false; e.target.classList.add('on');
+    document.getElementById('blurSample').classList.remove('on');
+  });
+  document.getElementById('blurSample').addEventListener('click', e => {
+    generative = true; e.target.classList.add('on');
+    document.getElementById('blurMean').classList.remove('on');
+  });
+})();
+
+/* ---------- 04 denoising ---------- */
+(function(){
+  const cv = document.getElementById('denoise');
+  const range = document.getElementById('denoiseRange');
+  const tauLbl = document.getElementById('denoiseTau');
+  let last = performance.now(), playing = true, phase = 0;
+
+  function draw(now){
+    const { ctx, w, h } = setupCanvas(cv);
+    const dt = Math.min(0.05, (now - last)/1000); last = now;
+    if (playing){
+      phase += dt * 0.32;
+      if (phase > 1.3) phase = 0;
+    }
+    const shown = playing ? clamp(phase, 0, 1) : range.value/100;
+    if (playing) range.value = shown*100;
+
+    ctx.clearRect(0,0,w,h);
+    const n = 5, bw = 160, bh = 160, gap = 26;
+    const totalW = n*bw + (n-1)*gap;
+    const x0 = (w-totalW)/2, y = 58;
+
+    for (let k = 0; k < n; k++){
+      const x = x0 + k*(bw+gap);
+      const prog = k/(n-1);
+      const active = Math.abs(shown - prog) < 0.12;
+
+      ctx.save();
+      roundRect(ctx, x, y, bw, bh, 9); ctx.clip();
+      const g = ctx.createLinearGradient(x, y, x+bw, y+bh);
+      g.addColorStop(0, 'hsla(215,55%,36%,0.95)');
+      g.addColorStop(1, 'hsla(280,45%,26%,0.95)');
+      ctx.fillStyle = g; ctx.fillRect(x, y, bw, bh);
+      const bx = x + bw*0.5, by = y + bh*0.5;
+      const rg = ctx.createRadialGradient(bx, by, 2, bx, by, 34);
+      rg.addColorStop(0, 'rgba(255,255,255,0.95)'); rg.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.fillStyle = rg; ctx.beginPath(); ctx.arc(bx, by, 34, 0, TAU); ctx.fill();
+      ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(bx, by, 14, 0, TAU); ctx.fill();
+
+      const nz = clamp((1-shown)*0.9, 0, 1) + (1-prog)*0.1;
+      if (nz > 0.01){
+        ctx.globalAlpha = clamp(nz,0,1);
+        for (let i = 0; i < 240; i++){
+          const px = x + rand2(i*3+k, 1)*bw;
+          const py = y + rand2(i*7+k, 2)*bh;
+          const s = 1 + rand2(i+k, 3)*2.2;
+          const v = rand2(i*11+k, 4);
+          ctx.fillStyle = v > 0.5 ? 'rgba(255,255,255,0.8)' : 'rgba(0,0,0,0.75)';
+          ctx.fillRect(px, py, s, s);
+        }
+        ctx.globalAlpha = 1;
+      }
+      ctx.restore();
+
+      ctx.strokeStyle = active ? C.accent : 'rgba(110,168,254,0.25)';
+      ctx.lineWidth = active ? 2.4 : 1.2;
+      roundRect(ctx, x, y, bw, bh, 9); ctx.stroke();
+
+      ctx.textAlign = 'center';
+      ctx.font = '11px ui-monospace, monospace';
+      ctx.fillStyle = active ? C.accent : C.dim2;
+      const lbl = k === 0 ? 'x⁰ (clean)' : (k === n-1 ? 'x^N (noise)' : `step ${k}`);
+      ctx.fillText(lbl, x+bw/2, y+bh+20);
+      ctx.textAlign = 'left';
+    }
+
+    const arrowY = y + 12;
+    arrow(ctx, x0 + bw + 4, arrowY, x0 + bw + gap - 4, arrowY, 'rgba(251,191,36,0.75)');
+    ctx.fillStyle = C.warn; ctx.font = '10.5px ui-monospace, monospace';
+    ctx.fillText('ε_θ(·, τ, z)', x0 + bw - 4, arrowY - 8);
+
+    ctx.fillStyle = C.dim2; ctx.font = '11.5px ui-monospace, monospace';
+    ctx.fillText('reverse process: each step is one full network forward pass conditioned on z', x0, h-14);
+
+    const N = 100, tau = Math.round((1 - shown) * N);
+    tauLbl.textContent = tau === N ? `τ = ${N} (pure noise)` : (tau === 0 ? 'τ = 0 (denoised)' : `τ = ${tau} / ${N}`);
+    requestAnimationFrame(draw);
+  }
+  requestAnimationFrame(draw);
+  document.getElementById('denoisePlay').addEventListener('click', e => {
+    playing = !playing;
+    e.target.textContent = playing ? '⏸ pause' : '▶ play reverse';
+  });
+  range.addEventListener('input', () => {
+    playing = false;
+    document.getElementById('denoisePlay').textContent = '▶ play reverse';
+  });
+})();
+
+/* ---------- 05 compute budget ---------- */
+(function(){
+  const el = id => document.getElementById(id);
+  const ranges = { P: el('pRange'), n: el('nRange'), N: el('NRange'), d: el('dRange') };
+  const fmt = (x, p=2) => {
+    const e = Math.floor(Math.log10(Math.abs(x) || 1));
+    return `${(x / Math.pow(10, e)).toFixed(p)}e${e}`;
+  };
+  const fmtInt = x => x >= 1000 ? fmt(x,2) : String(Math.round(x));
+  const human = x => {
+    const e = Math.floor(Math.log10(Math.abs(x) || 1));
+    const units = {3:'k', 6:'M', 9:'G', 12:'T', 15:'P', 18:'E'};
+    const key = Math.floor(e/3)*3;
+    return units[key] ? (x/Math.pow(10, key)).toFixed(2) + units[key] : x.toFixed(0);
+  };
+  const sci = x => {
+    const e = Math.floor(Math.log10(Math.abs(x) || 1));
+    return `${(x/Math.pow(10,e)).toFixed(2)}×10^${e}`;
+  };
+
+  function update(){
+    const P = Math.pow(10, +ranges.P.value);
+    const n = Math.pow(10, +ranges.n.value);
+    const N = Math.pow(10, +ranges.N.value);
+    const d = Math.pow(10, +ranges.d.value);
+
+    el('pVal').textContent = fmt(P,2);
+    el('nVal').textContent = fmtInt(n);
+    el('NVal').textContent = fmtInt(N);
+    el('dVal').textContent = fmtInt(d);
+
+    const dec = 10 * P * n * N;
+    const lin = 2 * d * d;
+    const ratio = dec / lin;
+    const gpu = dec / 5e14;
+
+    el('roDec').textContent = sci(dec);
+    el('roLin').textContent = human(lin);
+    el('roRatio').textContent = human(ratio);
+    el('roGpu').textContent = gpu < 1 ? gpu.toFixed(3) : sci(gpu);
+    el('roBytes').textContent = human(2*P) + 'B';
+    el('roBytesLin').textContent = human(2*d*d) + 'B';
+
+    const pct = clamp((Math.log10(ratio) - 2) / 10 * 100, 0, 100);
+    el('roBar').style.width = pct + '%';
+
+    const v = el('verdict');
+    v.className = 'verdict ' + (ratio > 1e6 ? 'r' : ratio > 1e3 ? 'w' : 'g');
+    v.textContent = ratio > 1e6
+      ? `ratio ≈ ${human(ratio)}× — a generative readout here is affordable offline only, never in a real-time loop.`
+      : ratio > 1e3
+      ? `ratio ≈ ${human(ratio)}× — noticeable, but possibly affordable if latency doesn't matter.`
+      : `ratio ≈ ${human(ratio)}× — comparable cost; a generative readout is cheap at this scale.`;
+  }
+  Object.values(ranges).forEach(r => r.addEventListener('input', update));
+  update();
+})();
+
+/* ---------- 08 aliasing ---------- */
+(function(){
+  const cv = document.getElementById('alias');
+  const range = document.getElementById('aliasRange');
+  const info = document.getElementById('aliasInfo');
+  let last = performance.now(), t = 0;
+
+  const R = 20, s = 4, Rd = R / s;          // 20 fps, decimate by 4 -> 5 Hz
+  const fNq = Rd / 2;                        // new Nyquist = 2.5 Hz
+
+  function draw(now){
+    const { ctx, w, h } = setupCanvas(cv);
+    const dt = Math.min(0.05, (now - last)/1000); last = now; t += dt;
+    ctx.clearRect(0,0,w,h);
+
+    const f = (range.value / 100) * 5.0;     // true frequency 0..5 Hz
+    const k = Math.round(f / Rd);
+    const fAlias = Math.abs(f - k * Rd);
+
+    const padL = 60, padR = 30, topY = 60, rowH = 78;
+    const W = w - padL - padR;
+    const Ncyc = 2.0;                         // show 2 seconds
+
+    // --- helper: draw a tone over 2 s, with sample dots ---
+    function tone(y, freq, rate, col, dotCol, phase, label){
+      ctx.strokeStyle = col; ctx.lineWidth = 2;
+      ctx.beginPath();
+      for (let px = 0; px <= W; px++){
+        const tt = (px / W) * Ncyc;
+        const v = Math.cos(2*Math.PI*freq*tt + phase);
+        const yy = y - v * (rowH/2 - 12);
+        px === 0 ? ctx.moveTo(padL+px, yy) : ctx.lineTo(padL+px, yy);
+      }
+      ctx.stroke();
+      // samples
+      const ns = Math.floor(Ncyc * rate) + 1;
+      for (let i = 0; i < ns; i++){
+        const tt = i / rate;
+        const px = (tt / Ncyc) * W;
+        const v = Math.cos(2*Math.PI*freq*tt + phase);
+        const yy = y - v * (rowH/2 - 12);
+        ctx.fillStyle = dotCol;
+        ctx.beginPath(); ctx.arc(padL+px, yy, 3, 0, TAU); ctx.fill();
+      }
+      // baseline
+      ctx.strokeStyle = 'rgba(147,161,184,0.18)'; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(padL+W, y); ctx.stroke();
+      // label
+      ctx.fillStyle = col; ctx.font = '11px ui-monospace, monospace';
+      ctx.fillText(label, 8, y+4);
+    }
+
+    // row 1: the true tone at 20 fps
+    tone(topY, f, R, C.accent, C.accent, 0, `${f.toFixed(2)} Hz`);
+
+    // row 2: the same tone decimated to 5 Hz — samples only, plus the alias tone
+    tone(topY+rowH+40, f, Rd, 'rgba(147,161,184,0.55)', C.warn, 0, 'at 5 Hz');
+    // overlay the alias curve
+    ctx.strokeStyle = C.bad; ctx.lineWidth = 2; ctx.setLineDash([6,4]);
+    ctx.beginPath();
+    for (let px = 0; px <= W; px++){
+      const tt = (px / W) * Ncyc;
+      const v = Math.cos(2*Math.PI*fAlias*tt);
+      const yy = (topY+rowH+40) - v * (rowH/2 - 12);
+      px === 0 ? ctx.moveTo(padL+px, yy) : ctx.lineTo(padL+px, yy);
+    }
+    ctx.stroke(); ctx.setLineDash([]);
+
+    // Nyquist marker
+    ctx.fillStyle = C.dim2; ctx.font = '10.5px ui-monospace, monospace';
+    ctx.fillText(`20 fps  (Nyquist 10 Hz)`, padL, topY - rowH/2 - 6);
+    ctx.fillText(`decimated: 5 Hz  (Nyquist 2.5 Hz)`, padL, topY + rowH + 40 - rowH/2 - 6);
+    ctx.fillStyle = C.bad;
+    ctx.fillText(`alias → ${fAlias.toFixed(3)} Hz`, padL + W - 150, topY + rowH + 40 - rowH/2 - 6);
+
+    // verdict
+    const folds = f > fNq;
+    ctx.fillStyle = folds ? C.bad : C.good;
+    ctx.font = '12px ui-monospace, monospace';
+    ctx.fillText(folds
+      ? `f = ${f.toFixed(2)} Hz is ABOVE the new Nyquist (${fNq} Hz) → it folds to ${fAlias.toFixed(3)} Hz`
+      : `f = ${f.toFixed(2)} Hz is below the new Nyquist (${fNq} Hz) → no aliasing`,
+      padL, h - 18);
+
+    info.textContent = `f = ${f.toFixed(2)} Hz → ${fAlias.toFixed(3)} Hz`;
+    requestAnimationFrame(draw);
+  }
+  requestAnimationFrame(draw);
+})();
+
+/* ---------- reveal ---------- */
+(function(){
+  const io = new IntersectionObserver(es => {
+    es.forEach(e => { if (e.isIntersecting) e.target.classList.add('in'); });
+  }, { threshold: 0.08 });
+  document.querySelectorAll('.reveal').forEach(el => io.observe(el));
+})();
+</script>
+</body>
+</html>
