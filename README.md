@@ -3,6 +3,16 @@
 **How fast must a world model look?** A computable information-theoretic floor on the temporal
 sampling rate, derived from the data's power spectrum *before any training*.
 
+![A world model's spectrum is a measure on a circle — and stride folds it](docs/figures/spectral-floor.png)
+
+*The whole thesis in one image. **A** the spectrum is a measure on the unit circle, and it is
+even, `S(f) = S(1−f)`, because the process is real. **B** decimating by stride `s` is the
+covering map `z ↦ z^s`: the `s` shifted copies sum to the fold, which is the aliasing identity.
+**C** the symmetry is the computation — expanding a one-sided spectrum by interpolation
+*clamps* it and silently biased the floor 46% low at `s=16`; mirroring is exact. **D** the floor
+`eps² = exp(⟨log S⟩)/⟨S⟩` is fixed by `S` alone, and a best-in-class predictor lands within 11%
+of it at every stride. Regenerate with `python3 scripts/make_figure.py`.*
+
 ## Results
 
 At stride `s` a world model sees `R/s` samples per second and, by Nyquist, nothing above
@@ -168,7 +178,8 @@ experiments/
   run_floor_experiment.py   the Week-1/Week-2 go/no-go: floor vs achieved error
 tests/       71 tests, all passing
 docs/        the maths, the explainer, the reading list, the strategy
-scripts/     diagnostics
+  figures/spectral-floor.png   the one-image thesis (regenerate: scripts/make_figure.py)
+scripts/     diagnostics + the figure generator
 ```
 
 ### What is in `docs/`
