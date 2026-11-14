@@ -82,7 +82,7 @@ The stale test (`test_welch_floor_is_biased_at_large_stride`) has been replaced 
 | `test_two_sided_psd_rejects_mismatched_shapes` | input validation |
 | `test_clamping_the_one_sided_psd_biases_the_floor_low` | clamping biases low, the bias grows with stride (0.0002 → 0.13), and mirroring removes it |
 
-71 tests pass. `scripts/diagnose_resampling.py` reproduces both constructions side by side for
+73 tests pass (rewritten to check oracles, not shapes). `scripts/diagnose_resampling.py` reproduces both constructions side by side for
 anyone who wants to see the bug and the fix in one output.
 
 ## The lesson, stated generally
@@ -91,3 +91,37 @@ anyone who wants to see the bug and the fix in one output.
 approximation.** Any code that folds, decimates, or aliases a spectrum must first mirror it.
 The failure is silent: it produces plausible numbers, and it produces them worst exactly where
 the effect is most interesting (large stride).
+
+---
+
+## Follow-up (2026-11-14): make the class of bug unrepresentable
+
+The clamping bug and its siblings all share one cause: a bare `ndarray` carries no
+bookkeeping, so a one-sided estimate and a two-sided density are the same object to the type
+system. The library now passes a **`Spectrum`** instead — a frozen dataclass holding
+`(values, grid, sidedness, normalisation, n_segments, ...)` with its invariants checked on
+construction ("parse, don't validate", Alexis King). `Spectrum.from_welch` always returns the
+two-sided form; `alias_spectrum` calls `.two_sided()` itself; and `szego`, `floor`, `floor_curve`
+accept nothing but a `Spectrum`. The clamp cannot be written any more.
+
+Two more silent-numerics fixes landed with it:
+
+1. **`debias_welch` deleted.** It divided the periodogram pointwise by the window's leakage
+   kernel, but leakage is a convolution, not a multiplier: the Hann kernel is 0.25 at bin 1 and
+   below 2e-6 from bin 2 on, so floored at 1e-6 those bins were multiplied by 5e5–1e6, turning a
+   flat white-noise PSD into a rising ramp. Its only test ("runs and stays positive") passed on
+   that garbage. An exact deconvolution is ill-posed (arXiv:2312.13643); the citation stays, the
+   function does not.
+2. **The confidence interval was ~165× too narrow.** The first `floor` used
+   `Var(⟨log Ŝ⟩) ≈ ψ₁(K)/M`, which assumes independent frequency bins. Welch bins are correlated
+   through the window, so the interval is now a percentile bootstrap over the segments, which
+   carries the correlation through the fold.
+
+Also fixed: the fold now interpolates **periodically** (the old `np.interp` clamped the last
+sliver of the band, the same failure mode at the fold stage); `optimal_stride` no longer defaults
+to `max_inflation=1.0`, which always returned 1; and `floor` returns a `FloorResult` with the
+estimator, effective sample size, interval and warnings, not a bare float.
+
+The residual bias at large stride (Welch smoothing) is a resolution effect, not a resampling one,
+and is documented in `docs/SYSTEM-DESIGN.md` §5 and the README's limitations.
+
