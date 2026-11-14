@@ -21,7 +21,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.patches import FancyArrowPatch
 
-from spectral_floor import alias_spectrum, ar1_psd, ar1_floor, normalise_psd, szego
+from spectral_floor import (
+    Spectrum, alias_spectrum, ar1_floor, floor, normalise_psd,
+)
+from spectral_floor.floor import _periodic_interp
 from experiments.run_floor_experiment import (
     ar1_true_spectrum,
     linear_predictor_rel_mse,
@@ -53,10 +56,8 @@ plt.rcParams.update(
 )
 
 
-def spectrum(a: float, n: int = 20001) -> tuple[np.ndarray, np.ndarray]:
-    u = np.linspace(0, 1, n)[:-1]
-    _, S = ar1_psd(a, u)
-    return u, normalise_psd(S)
+def spectrum(a: float) -> Spectrum:
+    return Spectrum.from_ar1(a, n=20001)
 
 
 def panel_a(fig, gs_cell, u, S):
@@ -82,11 +83,12 @@ def panel_a(fig, gs_cell, u, S):
     return ax
 
 
-def panel_b(ax, u, S, s=4):
+def panel_b(ax, spec, s=4):
+    u, S = spec.grid, spec.values
     """Decimation = the covering map: s shifted copies sum to the fold."""
-    S_dec = alias_spectrum(S, s)
+    S_dec = alias_spectrum(spec, s).values
     for k in range(s):
-        shifted = np.interp((u + k) / s % 1.0, u, S) / s
+        shifted = _periodic_interp((u + k) / s, u, S) / s
         ax.plot(u, shifted, color=GOLD, lw=0.9, alpha=0.65,
                 label="shifted copies  S((f+k)/s)/s" if k == 0 else None)
     ax.plot(u, S_dec, color=INK, lw=2.2, label=f"fold  S_dec(f)   (s={s})")
@@ -131,11 +133,12 @@ def panel_c(ax, u, S):
         ax.spines[sp].set_visible(False)
 
 
-def panel_d(ax, u, S):
+def panel_d(ax, spec):
     """The floor: closed form vs numeric, plus the achieved error."""
+    u, S = spec.grid, spec.values
     strides = [1, 2, 4, 8, 16]
     closed = [ar1_floor(A, s) for s in strides]
-    numeric = [szego(alias_spectrum(S, s)) for s in strides]
+    numeric = [floor(spec, s).eps2 for s in strides]
 
     x = simulate_ar1(A, 400_000, seed=0)
     achieved = [linear_predictor_rel_mse(x, s, window=256) for s in strides]
@@ -165,15 +168,16 @@ def panel_d(ax, u, S):
 def main():
     import os
 
-    u, S = spectrum(A)
+    spec = spectrum(A)
+    u, S = spec.grid, spec.values
     fig = plt.figure(figsize=(11, 8.6))
     gs = fig.add_gridspec(2, 2, hspace=0.42, wspace=0.28,
                           left=0.07, right=0.97, top=0.88, bottom=0.08)
 
     panel_a(fig, gs[0, 0], u, S)
-    panel_b(fig.add_subplot(gs[0, 1]), u, S)
+    panel_b(fig.add_subplot(gs[0, 1]), spec)
     panel_c(fig.add_subplot(gs[1, 0]), u, S)
-    panel_d(fig.add_subplot(gs[1, 1]), u, S)
+    panel_d(fig.add_subplot(gs[1, 1]), spec)
 
     fig.suptitle("A world model's spectrum is a measure on a circle — and stride folds it",
                  fontsize=13.5, color=INK, x=0.07, ha="left", y=0.965, weight="bold")
@@ -196,7 +200,7 @@ def main():
     print(f"  {'s':>3}  {'closed':>9}  {'numeric':>9}  {'achieved':>9}  {'gap':>6}")
     for s in strides:
         f = ar1_floor(A, s)
-        n = szego(alias_spectrum(S, s))
+        n = floor(spec, s).eps2
         ac = linear_predictor_rel_mse(x, s, window=256)
         print(f"  {s:>3}  {f:>9.5f}  {n:>9.5f}  {ac:>9.5f}  {ac/f:>5.2f}x")
 

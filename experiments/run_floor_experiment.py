@@ -1,8 +1,8 @@
 """Experiment 1: does the Kolmogorov-Szego floor bind on real (or simulated) data?
 
 This is the Week-1 / Week-2 go-no-go.  For each stride s it:
-  1. estimates the observation spectrum S(f),
-  2. computes the floor eps2(s) from the aliased spectrum,
+  1. estimates the observation spectrum S(f) as a Spectrum (two-sided),
+  2. computes the floor eps2(s) from the aliased spectrum, with an interval,
   3. fits the best linear predictor at stride s,
   4. reports the *aliasing gap* = achieved / floor.
 
@@ -22,15 +22,7 @@ from pathlib import Path
 
 import numpy as np
 
-from spectral_floor import (
-    welch_psd,
-    debias_welch,
-    normalise_psd,
-    szego,
-    alias_spectrum,
-    ar1_psd,
-    two_sided_psd,
-)
+from spectral_floor import Spectrum, floor, floor_curve, ar1_floor
 
 
 def linear_predictor_rel_mse(x: np.ndarray, s: int, window: int = 256) -> float:
@@ -71,42 +63,38 @@ def load_csv(path: str, column: int = 0) -> np.ndarray:
 
 
 def run(x: np.ndarray, strides, window: int = 256, nperseg: int = 512,
-        source: str = "?", S_true: np.ndarray | None = None) -> dict:
-    # 1. estimate the spectrum from the full-rate signal, then expand the
-    #    one-sided estimate to the full [0, 1) band for the folding step.
-    #    `two_sided_psd` mirrors rather than clamps; interpolating the one-sided
-    #    estimate directly onto [0, 1) would clamp the upper band and bias the
-    #    floor low, increasingly with stride.
-    freqs, S_hat = welch_psd(x, nperseg=nperseg)
-    _, S = two_sided_psd(freqs, S_hat)
-    if S_true is not None:
-        S_true = normalise_psd(np.asarray(S_true, dtype=float).ravel())
+        source: str = "?", S_true: Spectrum | None = None) -> dict:
+    # Estimate the spectrum as a Spectrum object.  from_welch always returns the
+    # two-sided density the folding step needs, so the one-sided-clamp bug cannot
+    # be written here at all.
+    S = Spectrum.from_welch(x, nperseg=nperseg)
 
     rows = []
     for s in strides:
         s = int(s)
-        floor = szego(alias_spectrum(S, s))
+        res = floor(S, s)
         achieved = linear_predictor_rel_mse(x, s, window=window)
         row = {
             "stride": s,
             "rate_factor": 1.0 / s,
-            "floor_est": floor,
+            "floor_est": res.eps2,
+            "floor_lo": res.ci_low,
+            "floor_hi": res.ci_high,
             "achieved": achieved,
-            "gap_est": achieved / floor if floor > 0 else float("nan"),
+            "gap_est": achieved / res.eps2 if res.eps2 > 0 else float("nan"),
+            "warnings": list(res.warnings),
         }
         if S_true is not None:
-            ft = szego(alias_spectrum(S_true, s))
+            ft = floor(S_true, s).eps2
             row["floor_true"] = ft
             row["gap_true"] = achieved / ft if ft > 0 else float("nan")
         rows.append(row)
     return {"source": source, "n_samples": int(len(x)), "nperseg": nperseg, "rows": rows}
 
 
-def ar1_true_spectrum(a: float) -> np.ndarray:
-    """Analytic AR(1) PSD resampled onto the dense unit-circle grid."""
-    u = np.linspace(0, 1, 20001)[:-1]
-    _, S = ar1_psd(a, u)
-    return normalise_psd(S)
+def ar1_true_spectrum(a: float) -> Spectrum:
+    """Analytic AR(1) Spectrum: the oracle."""
+    return Spectrum.from_ar1(a)
 
 
 def main():
@@ -144,14 +132,21 @@ def main():
             print(f"  {r['stride']:>6}  {r['floor_est']:>10.5f}  {r['floor_true']:>11.5f}  "
                   f"{r['achieved']:>9.5f}  {r['gap_true']:>8.2f}x")
         gaps = [r["gap_true"] for r in res["rows"]]
-        print("\n  note: floor(est) is computed from a Welch estimate of S; after the")
-        print("        two-sided mirroring fix it tracks the analytic floor(true) to")
-        print("        within ~5% at every stride (the residual is estimation noise).")
+        covered = [r["floor_lo"] <= r["floor_true"] <= r["floor_hi"] for r in res["rows"]]
+        n_cov = sum(covered)
+        print("\n  note: floor(est) comes from a Welch estimate of S, with a bootstrap")
+        print("        interval over the segments.  It tracks the analytic floor(true)")
+        print(f"        within a few percent; the interval contains it at {n_cov}/{len(covered)}")
+        print("        strides.  At large stride the Welch window smooths the spectrum")
+        print("        and the point estimate drifts high, so the interval can miss --")
+        print("        the cure is resolution (larger nperseg), not a wider interval.")
     else:
-        print(f"  {'stride':>6}  {'floor(est)':>10}  {'achieved':>9}  {'gap':>8}")
-        print("  " + "-" * 42)
+        print(f"  {'stride':>6}  {'floor':>10}  {'95% CI':>18}  {'achieved':>9}  {'gap':>8}")
+        print("  " + "-" * 60)
         for r in res["rows"]:
-            print(f"  {r['stride']:>6}  {r['floor_est']:>10.5f}  {r['achieved']:>9.5f}  {r['gap_est']:>7.2f}x")
+            ci = f"[{r['floor_lo']:.5f}, {r['floor_hi']:.5f}]"
+            print(f"  {r['stride']:>6}  {r['floor_est']:>10.5f}  {ci:>18}  "
+                  f"{r['achieved']:>9.5f}  {r['gap_est']:>7.2f}x")
         gaps = [r["gap_est"] for r in res["rows"]]
 
     tight = max(gaps) < 1.5
