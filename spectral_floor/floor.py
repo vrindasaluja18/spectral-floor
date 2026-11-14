@@ -353,16 +353,19 @@ def design_law(S: Spectrum, strides) -> dict[int, float]:
     ``inflation(s) = floor(S, s).eps2 / floor(S, 1).eps2``.  This is the
     spectrum-general form of ``ar1_design_law``: it needs no AR(1) assumption, so
     the decision layer exists for a measured spectrum.
+
+    Only the point estimate is needed, so the bootstrap is skipped (``n_boot=0``);
+    the decision is a ratio of point estimates and the interval plays no part.
     """
     if not isinstance(S, Spectrum):
         raise TypeError(f"design_law expects a Spectrum, got {type(S).__name__}")
-    base = floor(S, 1).eps2
+    base = floor(S, 1, n_boot=0).eps2
     if base <= 0.0:
         raise ValueError(
             "floor at stride 1 is 0 (a deterministic or degenerate spectrum); "
             "relative inflation is undefined"
         )
-    return {int(s): floor(S, int(s)).eps2 / base for s in strides}
+    return {int(s): floor(S, int(s), n_boot=0).eps2 / base for s in strides}
 
 
 def optimal_stride(
@@ -376,6 +379,11 @@ def optimal_stride(
     ``inflation(s) <= max_inflation``.  ``max_inflation`` must exceed 1; at
     exactly 1 the answer is trivially stride 1, which is why the old default of
     1.0 was useless.
+
+    The scan compares point estimates, so it skips the bootstrap (``n_boot=0``).
+    At the default ``n_boot=200`` each ``floor`` call resamples the Welch segments
+    200 times, so scanning to ``max_stride`` cost minutes rather than the ~1 s the
+    point estimate needs -- and the point estimate is identical either way.
     """
     if not isinstance(S, Spectrum):
         raise TypeError(f"optimal_stride expects a Spectrum, got {type(S).__name__}")
@@ -384,12 +392,12 @@ def optimal_stride(
     if max_stride < 1:
         raise ValueError("max_stride must be >= 1")
 
-    base = floor(S, 1).eps2
+    base = floor(S, 1, n_boot=0).eps2
     if base <= 0.0:
         raise ValueError("floor at stride 1 is 0; the budget is undefined")
     best = 1
     for s in range(2, max_stride + 1):
-        if floor(S, s).eps2 / base <= max_inflation:
+        if floor(S, s, n_boot=0).eps2 / base <= max_inflation:
             best = s
         else:
             break

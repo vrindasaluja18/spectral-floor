@@ -235,6 +235,55 @@ class TestDesignLaw:
 
 
 # ==========================================================================
+# The decision layer must not pay for the bootstrap it does not use
+# ==========================================================================
+class TestDecisionLayerSkipsBootstrap:
+    """Regression: ``design_law`` and ``optimal_stride`` compare point estimates,
+    but used to call ``floor`` with its default ``n_boot=200``.  Every call then
+    resampled the Welch segments 200 times, so a scan to ``max_stride`` took
+    minutes instead of the ~1 s the point estimate needs.  The point estimate is
+    identical either way, so the interval was pure waste."""
+
+    def _spy_n_boot(self, monkeypatch):
+        import sys
+
+        F = sys.modules["spectral_floor.floor"]
+        seen = []
+        real = F.floor
+
+        def spy(S, stride=1, **kw):
+            seen.append(kw.get("n_boot", 200))
+            return real(S, stride, **kw)
+
+        monkeypatch.setattr(F, "floor", spy)
+        return seen
+
+    def test_design_law_skips_bootstrap(self, monkeypatch):
+        seen = self._spy_n_boot(monkeypatch)
+        S = Spectrum.from_ar1(0.99)
+        design_law(S, [1, 2, 4])
+        assert seen and all(n == 0 for n in seen), seen
+
+    def test_optimal_stride_skips_bootstrap(self, monkeypatch):
+        seen = self._spy_n_boot(monkeypatch)
+        S = Spectrum.from_ar1(0.99)
+        optimal_stride(S, max_inflation=2.0)
+        assert seen and all(n == 0 for n in seen), seen
+
+    def test_optimal_stride_value_unchanged_by_the_fix(self):
+        """The answer is the point-estimate ratio, so it must be the brute force one."""
+        S = Spectrum.from_ar1(0.99)
+        base = floor(S, 1, n_boot=0).eps2
+        ref = 1
+        for s in range(2, 1024 + 1):
+            if floor(S, s, n_boot=0).eps2 / base <= 4.0:
+                ref = s
+            else:
+                break
+        assert optimal_stride(S, max_inflation=4.0) == ref
+
+
+# ==========================================================================
 # The result object
 # ==========================================================================
 class TestFloorResult:
