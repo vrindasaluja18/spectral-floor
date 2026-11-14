@@ -126,13 +126,17 @@ Closed forms for AR(1): `1 − a^(2s)` and `(1 − a^(2s))/(1 − a²)`. The ora
 
 Relative error inflation vs stride 1, from a *measured* spectrum:
 `floor(S,s).eps2 / floor(S,1).eps2`. The spectrum-general form of
-`ar1_design_law`; it needs no AR(1) assumption.
+`ar1_design_law`; it needs no AR(1) assumption. The ratio is a ratio of point
+estimates, so it skips the bootstrap (`n_boot=0`).
 
 ### `optimal_stride(S, max_inflation=2.0, max_stride=1024) -> int`
 
 The largest stride whose inflation stays within `max_inflation`. `max_inflation`
 must exceed 1 (a budget of 1 leaves only stride 1 — which is why the old default of
-1.0 was useless).
+1.0 was useless). The scan compares point estimates, so it skips the bootstrap
+(`n_boot=0`); at the default `n_boot=200` each `floor` call resampled the Welch
+segments 200 times, which made a scan to `max_stride` take minutes rather than the
+~1 s the point estimate needs — for an identical answer.
 
 ---
 
