@@ -1,8 +1,21 @@
 """Power spectral density estimation.
 
-We estimate S(f) from observed time series with Welch's method, and optionally
-debias it.  Bias matters: the floor is a ratio of <log S> to <S>, and log makes it
-sensitive to the low-power tail that a biased estimator smears.
+We estimate S(f) from observed time series with Welch's method.  Bias matters:
+the floor is a ratio of <log S> to <S>, and log makes it sensitive to the
+low-power tail that a biased estimator smears.
+
+A note on debiasing, kept because it is a real trap.  A finite window convolves
+the true spectrum with the window's leakage kernel, so the periodogram is biased.
+The obvious correction -- dividing the averaged periodogram pointwise by the
+kernel -- is *wrong*: leakage is a convolution, not a multiplier, so dividing by
+it multiplies instead of undoing.  For a Hann window the normalised kernel is
+0.25 at bin 1 and below 2e-6 from bin 2 on; floored at 1e-6 those bins get
+multiplied by 5e5 to 1e6, turning a flat white-noise PSD into a rising ramp.  An
+earlier version of this module shipped exactly that function.  It is deleted, not
+"fixed": a correct deconvolution is ill-posed and is a research problem in its own
+right (see arXiv:2312.13643, "Debiasing Welch's Method", Biometrika).  What we do
+instead is report the estimator's segment count so the floor can carry an honest
+confidence interval.
 """
 
 from __future__ import annotations
@@ -25,10 +38,15 @@ def welch_psd(
     noverlap: int | None = None,
     window: str = "hann",
     detrend: bool = True,
-) -> tuple[np.ndarray, np.ndarray]:
+    return_n_segments: bool = False,
+    return_segments: bool = False,
+) -> tuple:
     """Welch periodogram.
 
-    Returns (freqs, psd) with freqs in cycles/sample in [0, 0.5].
+    Returns (freqs, psd) with freqs in cycles/sample in [0, 0.5].  With
+    ``return_n_segments`` it appends the segment count; with ``return_segments``
+    it appends the (n_segments, n_freq) stack of individual periodograms, which
+    ``floor`` bootstraps over to get an honest confidence interval.
 
     Implemented directly (segmented periodogram + averaging) so the package has no
     scipy dependency.  `window` is one of {"hann", "hamming", "boxcar"}.
@@ -56,44 +74,19 @@ def welch_psd(
     # normalise window so the periodogram is unbiased for white noise
     wpow = (w ** 2).sum()
     nseg = 1 + (len(x) - nperseg) // step
-    acc = np.zeros(nperseg // 2 + 1)
+    n_freq = nperseg // 2 + 1
+    segs = np.empty((nseg, n_freq))
     for i in range(nseg):
         seg = x[i * step: i * step + nperseg] * w
         spec = np.fft.rfft(seg)
-        acc += (np.abs(spec) ** 2) / wpow
-    psd = acc / nseg
+        segs[i] = (np.abs(spec) ** 2) / wpow
+    psd = segs.mean(axis=0)
     freqs = np.fft.rfftfreq(nperseg, d=1.0)
+    if return_segments:
+        return freqs, psd, int(nseg), segs
+    if return_n_segments:
+        return freqs, psd, int(nseg)
     return freqs, psd
-
-
-def debias_welch(
-    x: np.ndarray,
-    nperseg: int = 256,
-    noverlap: int | None = None,
-    window: str = "hann",
-) -> tuple[np.ndarray, np.ndarray]:
-    """Welch with a first-order bias correction.
-
-    The plain periodogram of a finite window is a *biased* estimate of the true
-    spectrum: it convolves S with the window's spectral leakage kernel.  A standard
-    cheap correction is to divide by the squared window's transfer function, which
-    we apply in the frequency domain on the averaged periodogram.
-
-    This is a pragmatic correction, not an exact inverse (which is ill-posed).  For
-    a principled treatment see arXiv:2312.13643 ("Debiasing Welch's Method").
-    """
-    freqs, psd = welch_psd(x, nperseg=nperseg, noverlap=noverlap, window=window)
-    if window == "boxcar":
-        return freqs, psd
-    w = np.hanning(nperseg) if window == "hann" else np.hamming(nperseg)
-    # |W(f)|^2 normalised to unit DC gain
-    Wf = np.abs(np.fft.rfft(w, n=2 * nperseg)) ** 2
-    Wf = Wf / Wf[0]
-    # resample the kernel onto our freq grid and divide
-    grid = np.linspace(0, 0.5, len(Wf))
-    kernel = np.interp(freqs, grid, Wf)
-    corrected = psd / np.maximum(kernel, 1e-6)
-    return freqs, corrected
 
 
 def two_sided_psd(

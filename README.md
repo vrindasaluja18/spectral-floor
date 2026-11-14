@@ -128,7 +128,7 @@ See `docs/research-findings-2026-11-13.md` §4 (Proposal B, `latent-floor`) and
 
 ```bash
 pip install numpy pytest
-python3 -m pytest tests/ -q                       # 71 passed
+python3 -m pytest tests/ -q                       # 73 passed
 PYTHONPATH=. python3 -m experiments.run_floor_experiment --source ar1 --a 0.99
 ```
 
@@ -160,32 +160,69 @@ artificially bad.
 
 A real-valued stationary process has an **even** density, `S(f) = S(1 − f)`, so the correct
 expansion is a *mirror*, not an interpolation. `two_sided_psd` does this exactly, and the
-estimator now tracks the analytic floor to within ~5% at every stride. Both the wrong and the
-right constructions are pinned in the test suite.
+estimator now tracks the analytic floor to within a few percent at every stride.
+
+This is no longer a rule you have to remember: `Spectrum.from_welch` always returns the
+mirrored two-sided form, and the fold routines accept only a `Spectrum`. The one-sided
+estimate cannot be folded as if it were two-sided, because there is no bare array to pass.
 
 An earlier version of this project attributed the discrepancy to Welch estimator bias. That was
 wrong: the estimator was fine and the resampling was the bug. `scripts/diagnose_resampling.py`
 reproduces both constructions on an exactly-known spectrum, and `docs/FINDINGS-resampling.md`
 writes up the measured error at each stride.
 
+### A second trap: an interval that looks tighter than it is
+
+The first version of `floor` attached an analytic confidence interval,
+`Var(⟨log Ŝ⟩) ≈ ψ₁(K)/M`. Measured against the AR(1) oracle it was **~165× too narrow**,
+because Welch frequency bins are correlated — the window's leakage kernel couples
+neighbours — so treating `nperseg/2` bins as independent is simply wrong. The interval is now
+a percentile bootstrap over the segments, which carries that correlation through the fold.
+A residual bias remains at large stride (the Welch window smooths the spectrum); the cure is
+resolution (`nperseg`), and `docs/SYSTEM-DESIGN.md` §5 states it plainly.
+
 ## What is in here
 
 ```
 spectral_floor/
-  psd.py     Welch periodogram, one-sided -> two-sided expansion, analytic AR(1) PSD
-  floor.py   Kolmogorov-Szego, the aliasing identity, the closed form, the design law
+  psd.py       Welch periodogram, one-sided -> two-sided expansion, analytic AR(1) PSD
+  spectrum.py  the Spectrum type: parse an estimate, don't validate it
+  floor.py     Kolmogorov-Szego, the aliasing identity, the design law, FloorResult
 experiments/
   run_floor_experiment.py   the Week-1/Week-2 go/no-go: floor vs achieved error
-tests/       71 tests, all passing
+tests/       73 tests, all passing, checked against oracles
 docs/        the maths, the explainer, the reading list, the strategy
   figures/spectral-floor.png   the one-image thesis (regenerate: scripts/make_figure.py)
 scripts/     diagnostics + the figure generator
 ```
 
+### The API: parse, don't validate
+
+The floor routines take a **`Spectrum`**, never a bare array. A `Spectrum` carries
+its grid, its sidedness, its normalisation and its number of segments, so a
+one-sided estimate cannot be silently folded as if it were two-sided — the bug
+class behind the clamp. `Spectrum.from_welch(x)` always returns the two-sided form
+the folding step needs. `floor` returns a `FloorResult`, not a float:
+
+```python
+from spectral_floor import Spectrum, floor, design_law, optimal_stride
+
+S = Spectrum.from_welch(x, nperseg=1024)      # always two-sided
+r = floor(S, stride=4)                        # FloorResult
+print(r.eps2, r.ci_low, r.ci_high, r.warnings)
+print(design_law(S, [1, 2, 4, 8, 16]))        # inflation vs stride 1, no AR(1) needed
+print(optimal_stride(S, max_inflation=2.0))   # the largest affordable stride
+```
+
+See `docs/api.md` for the full surface and `docs/SYSTEM-DESIGN.md` for the
+architecture and the invariants at each boundary.
+
 ### What is in `docs/`
 
 | File | What it is |
 |---|---|
+| `SYSTEM-DESIGN.md` | The architecture: layers, data flow, invariants, why a bootstrap |
+| `api.md` | The full API surface, with a worked example |
 | `research-plan-sampling-rate.md` | The research plan: is this paper-shaped, and where is the gap? |
 | `reading-list-option-a.md` | Annotated reading list for the programme. |
 | `strategy-project-or-pr.md` | Decision doc: project vs PR, and where. |
@@ -199,10 +236,12 @@ scripts/     diagnostics + the figure generator
 ## Status and roadmap
 
 - [x] The floor formula, verified against AR(1) theory
-- [x] The aliasing identity, verified (power preservation)
+- [x] The aliasing identity, verified (power preservation, periodic fold)
 - [x] The closed form `eps²(s) = 1 − a^(2s)`, verified exactly
 - [x] Experiment runner: floor vs achieved error, with the aliasing gap
-- [x] 71 tests
+- [x] Typed `Spectrum` API (parse, don't validate) and a `FloorResult` with interval + warnings
+- [x] Decision layer on a *measured* spectrum (`design_law`, `optimal_stride`)
+- [x] Bootstrap confidence intervals; 73 tests checked against oracles
 - [ ] **Week 1:** estimate `S` from a *real* environment (Atari / DMControl). Does the floor
       still bind with a measured spectrum?
 - [ ] **Week 2:** train a small world model at two strides. Measure the gap. **Go/no-go.**
@@ -215,6 +254,10 @@ scripts/     diagnostics + the figure generator
   the floor is unbeatable by any model.
 - The closed form is exact only for first-order dynamics; real environments need the numeric
   Szegő value from a measured spectrum.
+- At large stride the Welch window smooths the spectrum and the estimated floor drifts high
+  (about +15% at `s=16` with `nperseg=256`, falling to +0.04% at `nperseg=4096`). The bootstrap
+  interval widens but cannot move a biased centre, so at coarse resolution the interval does not
+  cover the analytic value. The cure is resolution, not a wider interval.
 - Everything so far is simulated. The real test is Week 1.
 
 ## Positioning
