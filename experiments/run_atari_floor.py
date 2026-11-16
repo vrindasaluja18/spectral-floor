@@ -84,7 +84,7 @@ SCORE_ROWS = 34       # top strip holds the score digits
 # 1. roll out a real game
 # ---------------------------------------------------------------------------
 def rollout(game: str, steps: int, seed: int = 0):
-    """Run `steps` frames of active play; return (frames, ball_y, episodes).
+    """Run `steps` frames of active play; return (motion, ball_y, episodes).
 
     The policy is uniform-random: it keeps the game moving (a scripted policy that
     plays well reaches a steady state, which is *less* stationary) and needs no
@@ -93,6 +93,12 @@ def rollout(game: str, steps: int, seed: int = 0):
 
     FIRE is pressed at the start and after every reset; the game is reset on game
     over.  Both are load-bearing (see module docstring).
+
+    Memory is O(1) in `steps`: the frame stack is never retained.  `motion` is the
+    running |frame_t - frame_{t-1}|, so only the previous frame is kept alive.  The
+    obvious implementation -- accumulate all frames, then convert to float32 --
+    holds 4x the raw size and dies at ~100k steps (about 3.4 GB as uint8, then
+    about 13 GB as float32), which is exactly the regime this experiment needs.
     """
     from ale_py import ALEInterface, roms
 
@@ -107,8 +113,9 @@ def rollout(game: str, steps: int, seed: int = 0):
     ale.act(fire)
 
     rng = np.random.default_rng(seed)
-    frames = np.empty((steps, 210, 160), dtype=np.uint8)
+    motion = np.zeros(steps, dtype=np.float64)
     ball_y = np.full(steps, np.nan)
+    prev = None
     episodes = 1
     for t in range(steps):
         if ale.game_over():
@@ -117,9 +124,12 @@ def rollout(game: str, steps: int, seed: int = 0):
             episodes += 1
         screen = ale.getScreenGrayscale()
         ball_y[t] = detect_ball(screen)
+        cur = screen.astype(np.float32)      # one frame at a time, not the stack
+        if prev is not None:
+            motion[t] = np.abs(cur - prev).mean()
+        prev = cur
         ale.act(acts[int(rng.integers(len(acts)))])
-        frames[t] = screen
-    return frames, ball_y, episodes
+    return motion, ball_y, episodes
 
 
 def detect_ball(frame: np.ndarray):
@@ -158,11 +168,22 @@ def detect_paddle(frame: np.ndarray):
     return float(ys.mean())
 
 
-def motion_signal(frames: np.ndarray) -> np.ndarray:
-    """Mean |frame_t - frame_{t-1}|: motion energy, needing no detection."""
-    f = frames.astype(np.float32)
-    d = np.abs(np.diff(f, axis=0)).mean(axis=(1, 2))
-    return np.concatenate([[0.0], d])
+def motion_signal(frames: np.ndarray, block: int = 256) -> np.ndarray:
+    """Mean |frame_t - frame_{t-1}| per step: motion energy, needing no detection.
+
+    Processed in blocks of `block` frames, so the float32 temporary is bounded by
+    the block rather than by the whole stack.  A naive `frames.astype(np.float32)`
+    first allocates 4x the raw stack and is what makes the large-`steps` regime
+    (the one this experiment needs) run out of memory.
+    """
+    frames = np.asarray(frames)
+    n = frames.shape[0]
+    out = np.zeros(n, dtype=np.float64)
+    for start in range(1, n, block):
+        stop = min(start + block, n)
+        blk = frames[start - 1:stop].astype(np.float32)
+        out[start:stop] = np.abs(np.diff(blk, axis=0)).mean(axis=(1, 2))
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -207,8 +228,8 @@ def stationarity_report(x: np.ndarray, n_chunks: int = 8) -> dict:
 # ---------------------------------------------------------------------------
 def run_seed(game: str, steps: int, strides, nperseg: int, seed: int, use_esn: bool) -> dict:
     """One seed: per-stride floor, achievable error, and their ratio."""
-    frames, ball_y, episodes = rollout(game, steps, seed=seed)
-    x = normalise(motion_signal(frames))
+    motion, ball_y, episodes = rollout(game, steps, seed=seed)
+    x = normalise(motion)
     S = Spectrum.from_welch(x, nperseg=nperseg)
 
     rows = []

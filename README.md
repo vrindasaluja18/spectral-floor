@@ -136,7 +136,7 @@ See `docs/research-findings-2026-11-13.md` §4 (Proposal B, `latent-floor`) and
 
 ```bash
 pip install numpy pytest
-python3 -m pytest tests/ -q                       # 86 passed
+python3 -m pytest tests/ -q                       # 88 passed
 PYTHONPATH=. python3 -m experiments.run_floor_experiment --source ar1 --a 0.99
 PYTHONPATH=. python3 -m experiments.run_nonlinear_experiment   # the nonlinear gap
 

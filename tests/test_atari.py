@@ -82,6 +82,68 @@ def test_motion_signal_detects_change():
     assert m[0] == 0.0 and m[1] > 0.0
 
 
+def test_motion_signal_is_block_invariant():
+    """The block size bounds the float32 temporary; it must not change the result."""
+    rng = np.random.default_rng(0)
+    frames = (rng.random((137, 210, 160)) * 255).astype(np.uint8)
+    ref = motion_signal(frames)
+    for block in (1, 7, 64, 10_000):
+        assert np.allclose(motion_signal(frames, block=block), ref), block
+
+
+def test_rollout_is_streaming_not_accumulating(monkeypatch):
+    """rollout must not retain the frame stack: memory is O(1) in `steps`.
+
+    A fake ALE records any array whose first axis equals `steps` (that is what an
+    accumulating `np.empty((steps, 210, 160))` would be).  A streaming rollout only
+    ever holds a single (210, 160) frame plus two length-`steps` 1-D vectors, so no
+    *3-D* array of that size is ever created.  This fails on the pre-fix code.
+    """
+    import sys
+    import types
+
+    import numpy as np
+    from experiments import run_atari_floor as m
+
+    steps = 500
+    stacks = []
+
+    def make_spy(name):
+        real = getattr(np, name)
+
+        def spy(shape, *a, **k):
+            if isinstance(shape, tuple) and len(shape) == 3 and shape[0] == steps:
+                stacks.append((name, shape))
+            return real(shape, *a, **k)
+
+        return spy
+
+    for name in ("empty", "zeros", "full", "ones"):
+        monkeypatch.setattr(m.np, name, make_spy(name))
+
+    class FakeALE:
+        def setInt(self, *a): pass
+        def setFloat(self, *a): pass
+        def loadROM(self, *a): pass
+        def getMinimalActionSet(self): return [0, 1, 2, 3]
+        def reset_game(self): pass
+        def act(self, *a): pass
+        def game_over(self): return False
+        def getScreenGrayscale(self):
+            return np.full((210, 160), 87, dtype=np.uint8)
+
+    fake_ale_py = types.SimpleNamespace(
+        ALEInterface=FakeALE,
+        roms=types.SimpleNamespace(get_rom_path=lambda g: g),
+    )
+    monkeypatch.setitem(sys.modules, "ale_py", fake_ale_py)
+
+    motion, ball_y, episodes = m.rollout("pong", steps)
+
+    assert stacks == [], f"rollout allocated a {steps}-frame stack: {stacks}"
+    assert motion.shape == (steps,) and ball_y.shape == (steps,)
+
+
 def test_guarded_returns_nan_for_degenerate_signal():
     """A constant signal makes the relative MSE explode; report nan, not 1e30."""
     const = np.ones(500)
