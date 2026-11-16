@@ -33,6 +33,7 @@ from .floor import (
     design_law,
     optimal_stride,
 )
+from .budget import state_bytes_per_second
 
 __all__ = [
     # types
@@ -57,5 +58,7 @@ __all__ = [
     # the decision layer
     "design_law",
     "optimal_stride",
+    # the byte axis
+    "state_bytes_per_second",
 ]
 __version__ = "0.2.0"

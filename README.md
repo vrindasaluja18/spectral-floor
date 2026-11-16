@@ -50,7 +50,8 @@ The law exposes the trade-off, computable before training anything:
 At `a = 0.99`, stride 16 makes the best-possible *linear* error **13.8× worse** while reducing
 the state sampling rate **16×**. Stride is not a vibe; it is a design choice with a predictable
 accuracy cost, and that cost curve is computable up front. The last column is the sampling-rate
-saving (`s`), not a bytes measurement — the package computes no bytes (see Limitations).
+saving (`s`); it becomes a bytes/second saving only once a state width and dtype are fixed
+(see `state_bytes_per_second` and Limitations).
 
 ### Honest negative, on the first screen
 
@@ -279,9 +280,12 @@ architecture and the invariants at each boundary.
   linear class**, and the contribution is to *measure the gap* between it and a nonlinear model
   — not to claim the floor is unbeatable. Reproduce with
   `experiments/run_nonlinear_experiment.py`.
-- **No bytes.** The package computes no byte quantities. The "16×" in the table above is the
-  sampling-rate ratio `s`, not a measured byte saving. A bytes/second axis would require an
-  explicit state width and sample rate, which the package does not model.
+- **Bytes are arithmetic, not a measurement.** `state_bytes_per_second` prices a stride given
+  an explicit state width, element size and sample rate. The "16×" in the table above is the
+  sampling-rate ratio `s`, which equals the byte ratio only for a fixed state representation.
+  It covers the observation stream only (not latents or KV cache), assumes plain subsampling
+  with no anti-alias filter, and says nothing about whether a stride is admissible; that is
+  what the floor is for.
 - The closed form is exact only for first-order dynamics; real environments need the numeric
   Szegő value from a measured spectrum.
 - At large stride the Welch window smooths the spectrum and the estimated floor drifts high
