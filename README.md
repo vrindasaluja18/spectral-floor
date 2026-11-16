@@ -28,21 +28,29 @@ process with `a = 0.99` (400k samples, held-out evaluation).
 | 8 | 0.15336 | 0.14854 | 0.16321 | 1.10× |
 | 16 | 0.28972 | 0.27502 | 0.30550 | 1.11× |
 
-**Key finding: the floor binds.** A best-in-class linear predictor sits within 11% of the
-theoretical floor at every stride, and the gap is *constant* — it does not grow with stride. The
-floor is therefore usable as a **design law**, not merely a bound.
+**Key finding: the floor is exact for *linear* prediction, and binds tightly there.** A
+best-in-class linear predictor sits within 11% of the theoretical floor at every stride, and the
+gap is *constant* — it does not grow with stride. This is expected: `eps²` **is** the optimal
+linear predictor's error (Kolmogorov–Szegő), so a well-fit linear predictor must approach it.
+
+The floor is a lower bound for the *linear* class. It is **not** a lower bound for nonlinear
+models: on deterministic or finite-order nonlinear processes a reservoir (a small echo-state
+network) beats the floor, by up to **~30× at stride 1** (logistic map, `r = 3.9`: floor 0.634 vs
+ESN 0.017). The gap closes as stride grows and aliasing destroys the recoverable structure. See
+`experiments/run_nonlinear_experiment.py`.
 
 The law exposes the trade-off, computable before training anything:
 
-| `a` (corr. time) | s=2 | s=4 | s=8 | s=16 | state bytes/s saved at s=16 |
+| `a` (corr. time) | s=2 | s=4 | s=8 | s=16 | state samples/s saved at s=16 |
 |---|---|---|---|---|---|
 | 0.90 (~10 steps) | 1.81× | 3.00× | 4.29× | 5.08× | 16× |
 | 0.99 (~100 steps) | 1.98× | 3.88× | 7.46× | **13.82×** | 16× |
 | 0.995 (~200 steps) | 1.99× | 3.94× | 7.73× | 14.86× | 16× |
 
-At `a = 0.99`, stride 16 makes the best-possible error **13.8× worse** while saving **16×** on
-state bytes per second. Stride is not a vibe; it is a design choice with a predictable accuracy
-cost, and that cost curve is computable up front.
+At `a = 0.99`, stride 16 makes the best-possible *linear* error **13.8× worse** while reducing
+the state sampling rate **16×**. Stride is not a vibe; it is a design choice with a predictable
+accuracy cost, and that cost curve is computable up front. The last column is the sampling-rate
+saving (`s`), not a bytes measurement — the package computes no bytes (see Limitations).
 
 ### Honest negative, on the first screen
 
@@ -128,8 +136,9 @@ See `docs/research-findings-2026-11-13.md` §4 (Proposal B, `latent-floor`) and
 
 ```bash
 pip install numpy pytest
-python3 -m pytest tests/ -q                       # 73 passed
+python3 -m pytest tests/ -q                       # 76 passed
 PYTHONPATH=. python3 -m experiments.run_floor_experiment --source ar1 --a 0.99
+PYTHONPATH=. python3 -m experiments.run_nonlinear_experiment   # the nonlinear gap
 ```
 
 Output:
@@ -143,7 +152,18 @@ Output:
        8     0.15336      0.14854    0.16321      1.10x
       16     0.28972      0.27502    0.30550      1.11x
 
-  max gap = 1.11x  ->  floor is TIGHT (use it as a design law)
+  max gap = 1.11x  ->  floor is TIGHT for the linear predictor (as the theorem requires)
+```
+
+The nonlinear gap, same machinery, different processes:
+
+```
+  process                     s     floor       lin  gap_lin       esn  gap_esn
+  ------------------------------------------------------------------------------
+  ar1(0.99) [linear]          1   0.01905   0.02319    1.22x   0.02301    1.21x
+  logistic 3.9 [chaotic]      1   0.63382   0.63652    1.00x   0.01676    0.03x
+  logistic+noise              1   0.71604   0.70858    0.99x   0.04702    0.07x
+  nl_ar tanh                  1   0.15715   0.16079    1.02x   0.13559    0.86x
 ```
 
 ## The trap that is easy to fall into
@@ -249,9 +269,19 @@ architecture and the invariants at each boundary.
 
 ## Limitations (stated honestly)
 
-- The floor is **linear**. Neural networks are nonlinear and may beat it. The contribution is to
-  *measure the gap* between the linear floor and what a learned model achieves — not to claim
-  the floor is unbeatable by any model.
+- **The floor is the floor for *linear* prediction only.** `eps² = exp(⟨log S⟩)/⟨S⟩` is the exact
+  optimal one-step error of the best *linear* predictor (verified against a brute-force
+  Yule-Walker solve). It is a theorem that a linear predictor reaches it, so the constant ~1.1×
+  gap on AR(1) is close to a tautology. Nonlinear models **beat** it: a 150-unit echo-state
+  network reaches **~0.03× the floor** at stride 1 on the logistic map (`r = 3.9`), ~0.07× on a
+  noisy logistic map, ~0.86–0.91× on a bounded nonlinear AR. The gap closes toward 1.0 by stride
+  8 as aliasing destroys the recoverable structure. So the floor is a **lower bound for the
+  linear class**, and the contribution is to *measure the gap* between it and a nonlinear model
+  — not to claim the floor is unbeatable. Reproduce with
+  `experiments/run_nonlinear_experiment.py`.
+- **No bytes.** The package computes no byte quantities. The "16×" in the table above is the
+  sampling-rate ratio `s`, not a measured byte saving. A bytes/second axis would require an
+  explicit state width and sample rate, which the package does not model.
 - The closed form is exact only for first-order dynamics; real environments need the numeric
   Szegő value from a measured spectrum.
 - At large stride the Welch window smooths the spectrum and the estimated floor drifts high
