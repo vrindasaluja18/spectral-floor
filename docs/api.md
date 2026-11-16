@@ -160,6 +160,23 @@ Analytic AR(1) density; and scaling a PSD to unit mean.
 
 ---
 
+## The byte axis
+
+### `state_bytes_per_second(n_state, dtype_bytes, sample_rate, stride) -> float`
+
+`n_state * dtype_bytes * (sample_rate / stride)`: bytes per second of the strided
+observation stream. `n_state` and `dtype_bytes` cancel in the ratio between two strides,
+so stride `s` moves exactly `s`x fewer bytes for a fixed representation. Observation
+stream only; assumes plain subsampling (no anti-alias filter) and byte-aligned dtypes.
+It does not check that the stride is admissible; use `optimal_stride` for that.
+
+`n_state`, `dtype_bytes` and `stride` must be positive integers (an integral float such as
+`4.0` is accepted; `bool`, `nan`, `inf` and non-integers are rejected). `sample_rate` must
+be finite and > 0. Bad types raise `TypeError`; bad values raise `ValueError` naming the
+argument.
+
+---
+
 ## Example
 
 ```python
